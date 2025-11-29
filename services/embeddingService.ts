@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, EmbedContentResponse } from "@google/genai";
 import { EmbeddingConfig } from "../types";
 import { logger } from "./loggingService";
@@ -40,7 +41,6 @@ const withRetry = async <T>(
 
             if (error && typeof error.message === 'string') {
                  errorMessage = error.message;
-                 // FIX: Corrected typo in 'RESOURCE_EXHAUSTED'
                  if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
                      isRateLimitError = true;
                  }
@@ -69,13 +69,32 @@ const withRetry = async <T>(
 
 const generateGeminiEmbedding = async (text: string, config: EmbeddingConfig): Promise<number[]> => {
     const ai = getAiClient(config.apiKey);
-    // FIX: The compiler suggests 'contents' (plural) for the parameter name.
-    const result: EmbedContentResponse = await withRetry(() => ai.models.embedContent({
+    
+    // Use 'contents' (plural) as expected by the SDK/API to avoid "Value must be a list given an array path requests[]"
+    // 'contents' takes a Content object or array of parts.
+    const result = await withRetry(() => ai.models.embedContent({
         model: "text-embedding-004",
-        contents: text
-    }));
-    // FIX: The compiler suggests the response object has an 'embeddings' property, not 'embedding'.
-    return (result as any).embeddings.values;
+        contents: { parts: [{ text: text }] }
+    })) as any;
+
+    // The response might contain 'embedding' (singular) or 'embeddings' (plural array) depending on the SDK version/endpoint mapping.
+    
+    // 1. Check for singular 'embedding'
+    if (result.embedding && result.embedding.values) {
+        return result.embedding.values;
+    }
+    
+    // 2. Check for plural 'embeddings' (Array)
+    // IMPORTANT: result.embeddings is an array. result.embeddings.values is the Array Iterator function!
+    // We must access the first element of the array to get the actual embedding object.
+    if (result.embeddings && Array.isArray(result.embeddings) && result.embeddings.length > 0) {
+        if (result.embeddings[0].values) {
+            return result.embeddings[0].values;
+        }
+    }
+    
+    logger.error("Gemini Embed Response missing values:", result);
+    throw new Error("Gemini API response missing embedding values.");
 };
 
 const generateOpenAIEmbedding = async (text: string, config: EmbeddingConfig): Promise<number[]> => {
