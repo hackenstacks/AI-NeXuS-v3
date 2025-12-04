@@ -54,6 +54,17 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
     return bytes;
 }
 
+const imageUrlToBase64 = async (url: string): Promise<string> => {
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const base64 = await blobToBase64(blob);
+        return `data:${blob.type};base64,${base64}`;
+    } catch (e) {
+        return url; // Return URL if conversion fails
+    }
+};
+
 // --- OpenAI Compatible Service ---
 
 /**
@@ -77,6 +88,8 @@ const withRetry = async <T,>(
                  if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
                      isRateLimitError = true;
                  }
+            } else if (error instanceof Response && (error.status === 429 || error.status === 503)) {
+                isRateLimitError = true;
             }
 
             // Retry only on rate limit errors
@@ -100,16 +113,19 @@ const withRetry = async <T,>(
     throw new Error('API request failed to complete after all retries.');
 };
 
-// ... (OpenAI specific code omitted for brevity as it remains largely unchanged, focus is on Gemini features) ...
 const fetchWithRetry = async (
     url: RequestInfo, 
     options: RequestInit, 
     maxRetries = 3, 
     initialDelay = 2000
 ): Promise<Response> => {
-    // [Implementation preserved from previous version]
-    // ...
-    return fetch(url, options); // Simplified for this block, actual impl should stay
+    return withRetry(async () => {
+        const response = await fetch(url, options);
+        if (response.status === 429) {
+             throw new Error('429 Too Many Requests');
+        }
+        return response;
+    }, maxRetries, initialDelay);
 };
 
 const streamOpenAIChatResponse = async (
@@ -118,8 +134,63 @@ const streamOpenAIChatResponse = async (
     history: Message[],
     onChunk: (chunk: string) => void
 ): Promise<void> => {
-    // [Implementation preserved from previous version]
-    // ...
+    const messages = [
+        { role: 'system', content: systemInstruction },
+        ...history.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.content }))
+    ];
+
+    try {
+        const response = await fetchWithRetry(config.apiEndpoint!, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.apiKey || 'ollama'}` 
+            },
+            body: JSON.stringify({
+                model: config.model || 'llama3',
+                messages: messages,
+                stream: true,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`OpenAI API Error: ${response.status} - ${errorText}`);
+        }
+
+        if (!response.body) throw new Error('Response body is null');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('data: ')) {
+                    const data = trimmed.slice(6);
+                    if (data === '[DONE]') return;
+                    try {
+                        const json = JSON.parse(data);
+                        const content = json.choices?.[0]?.delta?.content || json.choices?.[0]?.text;
+                        if (content) onChunk(content);
+                    } catch (e) {
+                        // Ignore parse errors for partial chunks
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        logger.error("Error streaming OpenAI response:", error);
+        onChunk(`[Error: ${error instanceof Error ? error.message : String(error)}]`);
+    }
 };
 
 const buildImagePrompt = (prompt: string, settings: { [key: string]: any }): string => {
@@ -136,8 +207,7 @@ const buildImagePrompt = (prompt: string, settings: { [key: string]: any }): str
 };
 
 // --- Image Generators ---
-// [Previous Image Generators (OpenAI, Pollinations, etc) preserved]
-// ... 
+
 const generateGeminiImage = async (prompt: string, settings: { [key: string]: any }): Promise<string> => {
     const ai = getAiClient(settings?.apiKey);
     const fullPrompt = buildImagePrompt(prompt, settings);
@@ -185,24 +255,193 @@ const generateGeminiImage = async (prompt: string, settings: { [key: string]: an
 };
 
 const generateOpenAIImage = async (prompt: string, settings: { [key: string]: any }): Promise<string> => {
-    // [Implementation preserved]
-    throw new Error("Function not implemented in this snippet view");
+    const apiEndpoint = settings.apiEndpoint || 'https://api.openai.com/v1/images/generations';
+    const apiKey = settings.apiKey;
+    const model = settings.model || 'dall-e-3';
+    
+    if (!apiKey && apiEndpoint.includes('openai.com')) {
+        throw new Error("API Key is required for OpenAI image generation.");
+    }
+
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    };
+    if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    const fullPrompt = buildImagePrompt(prompt, settings);
+
+    const body = JSON.stringify({
+        model: model,
+        prompt: fullPrompt,
+        n: 1,
+        size: "1024x1024",
+        response_format: "b64_json"
+    });
+
+    const response = await fetchWithRetry(apiEndpoint, {
+        method: 'POST',
+        headers,
+        body
+    });
+
+    if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`OpenAI Image API Error (${response.status}): ${err}`);
+    }
+
+    const data = await response.json();
+    if (data.data && data.data.length > 0) {
+        if (data.data[0].b64_json) {
+            return `data:image/png;base64,${data.data[0].b64_json}`;
+        } else if (data.data[0].url) {
+            return await imageUrlToBase64(data.data[0].url);
+        }
+    }
+    throw new Error("No image data returned from OpenAI API.");
 };
+
 const generatePollinationsImage = async (prompt: string, settings: { [key: string]: any }): Promise<string> => {
-     // [Implementation preserved]
-     return ""; 
+    const model = settings.model || 'flux';
+    const fullPrompt = buildImagePrompt(prompt, settings);
+    const encodedPrompt = encodeURIComponent(fullPrompt);
+    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&nologo=true`;
+    
+    try {
+        const response = await fetchWithRetry(url, { method: 'GET' });
+        if (!response.ok) throw new Error(`Pollinations API Error: ${response.status}`);
+        const blob = await response.blob();
+        const base64 = await blobToBase64(blob);
+        return `data:${blob.type};base64,${base64}`;
+    } catch (e) {
+        logger.warn("Failed to download Pollinations image, returning direct URL.", e);
+        return url;
+    }
 };
+
 const generateHuggingFaceImage = async (prompt: string, settings: { [key: string]: any }): Promise<string> => {
-     // [Implementation preserved]
-     return "";
+    const model = settings.model || 'black-forest-labs/FLUX.1-dev';
+    const apiKey = settings.apiKey;
+    const url = `https://api-inference.huggingface.co/models/${model}`;
+    
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    };
+    if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    const fullPrompt = buildImagePrompt(prompt, settings);
+
+    const response = await fetchWithRetry(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ inputs: fullPrompt })
+    });
+
+    if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Hugging Face API Error (${response.status}): ${err}`);
+    }
+
+    const blob = await response.blob();
+    const base64 = await blobToBase64(blob);
+    return `data:${blob.type};base64,${base64}`;
 };
+
 const generateStabilityImage = async (prompt: string, settings: { [key: string]: any }): Promise<string> => {
-     // [Implementation preserved]
-     return "";
+    const apiKey = settings.apiKey;
+    if (!apiKey) throw new Error("API Key is required for Stability.ai");
+    
+    const model = settings.model || 'stable-diffusion-xl-1024-v1-0';
+    const url = `https://api.stability.ai/v1/generation/${model}/text-to-image`;
+    const fullPrompt = buildImagePrompt(prompt, settings);
+
+    const response = await fetchWithRetry(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            text_prompts: [{ text: fullPrompt }],
+            cfg_scale: 7,
+            height: 1024,
+            width: 1024,
+            samples: 1,
+            steps: 30,
+        }),
+    });
+
+    if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Stability API Error (${response.status}): ${err}`);
+    }
+
+    const data = await response.json();
+    if (data.artifacts && data.artifacts.length > 0) {
+        return `data:image/png;base64,${data.artifacts[0].base64}`;
+    }
+    throw new Error("No artifacts returned from Stability API.");
 };
+
 const generateAIHordeImage = async (prompt: string, settings: { [key: string]: any }): Promise<string> => {
-     // [Implementation preserved]
-     return "";
+    const apiKey = settings.apiKey || '0000000000';
+    const model = settings.model || 'stable_diffusion';
+    const fullPrompt = buildImagePrompt(prompt, settings);
+    
+    const initResponse = await fetchWithRetry('https://stablehorde.net/api/v2/generate/async', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'apikey': apiKey,
+            'Client-Agent': 'AI_Nexus:1.0:Unknown',
+        },
+        body: JSON.stringify({
+            prompt: fullPrompt,
+            params: {
+                n: 1,
+                steps: 20,
+                width: 512,
+                height: 512,
+            },
+            models: [model],
+            nsfw: true,
+            censor_nsfw: false,
+        })
+    });
+
+    if (!initResponse.ok) {
+        const err = await initResponse.text();
+        throw new Error(`AI Horde Init Error: ${err}`);
+    }
+
+    const initData = await initResponse.json();
+    const id = initData.id;
+    if (!id) throw new Error("AI Horde did not return a Job ID.");
+
+    let attempts = 0;
+    while (attempts < 60) {
+        await new Promise(r => setTimeout(r, 2000));
+        const statusResponse = await fetch(`https://stablehorde.net/api/v2/generate/status/${id}`);
+        if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+            if (statusData.done) {
+                if (statusData.generations && statusData.generations.length > 0) {
+                    const gen = statusData.generations[0];
+                    return gen.img; 
+                }
+                throw new Error("AI Horde finished but returned no image.");
+            }
+            if (!statusData.is_possible) {
+                throw new Error("AI Horde says generation is impossible with current settings.");
+            }
+        }
+        attempts++;
+    }
+    throw new Error("AI Horde generation timed out.");
 };
 
 
@@ -299,11 +538,6 @@ const normalizeGeminiHistory = (history: Message[]) => {
         }
     }
     
-    // API limitation: History must end with 'user' role if we are about to call model.
-    // However, generateContent doesn't enforce history structure as strictly as ChatSession. 
-    // But for correct turn-taking, we ensure the last item is user-aligned if needed, handled by main prompt.
-    // Here we just map history. The Orchestrator handles the final prompt append.
-
     return merged;
 };
 
@@ -330,9 +564,7 @@ const streamGeminiChatResponse = async (
         if (character.thinkingEnabled) {
             modelName = 'gemini-3-pro-preview';
             config.thinkingConfig = { thinkingBudget: 32768 }; 
-            // Note: maxOutputTokens must be carefully managed with thinkingBudget, we leave it to default/auto here.
         } else if (character.searchEnabled) {
-            // Flash supports search, but Pro can be better for complex synthesis. Stick to Flash for speed unless user chose specific model.
             config.tools = [{googleSearch: {}}];
         }
 
