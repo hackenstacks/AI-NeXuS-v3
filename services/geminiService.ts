@@ -136,7 +136,21 @@ const streamOpenAIChatResponse = async (
 ): Promise<void> => {
     const messages = [
         { role: 'system', content: systemInstruction },
-        ...history.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.content }))
+        ...history.map(m => {
+            let role = 'user';
+            let content = m.content;
+            
+            if (m.role === 'model') {
+                role = 'assistant';
+            } else if (m.role === 'narrator') {
+                // Map narrator to user with prefix to avoid validation errors on strict endpoints
+                // that don't support custom roles or misplaced system messages.
+                role = 'user'; 
+                content = `[Narrator]: ${m.content}`;
+            }
+            // Ensure no invalid roles are passed
+            return { role, content };
+        })
     ];
 
     try {
@@ -189,6 +203,40 @@ const streamOpenAIChatResponse = async (
         }
     } catch (error) {
         logger.error("Error streaming OpenAI response:", error);
+        onChunk(`[Error: ${error instanceof Error ? error.message : String(error)}]`);
+    }
+};
+
+const streamPollinationsChatResponse = async (
+    systemInstruction: string,
+    history: Message[],
+    onChunk: (chunk: string) => void
+): Promise<void> => {
+    // Pollinations Text API is a simple GET request: https://text.pollinations.ai/{prompt}
+    // It is stateless, so we must combine history into the prompt.
+    
+    let fullPrompt = `${systemInstruction}\n\n`;
+    history.forEach(msg => {
+        let roleLabel = 'User';
+        if (msg.role === 'model') roleLabel = 'Assistant';
+        else if (msg.role === 'narrator') roleLabel = 'Narrator';
+        
+        fullPrompt += `${roleLabel}: ${msg.content}\n`;
+    });
+    fullPrompt += "Assistant:";
+
+    const encodedPrompt = encodeURIComponent(fullPrompt);
+    const url = `https://text.pollinations.ai/${encodedPrompt}?model=openai`; 
+
+    try {
+        const response = await fetchWithRetry(url, { method: 'GET' });
+        if (!response.ok) {
+            throw new Error(`Pollinations API Error: ${response.status}`);
+        }
+        const text = await response.text();
+        onChunk(text); // Pollinations text API is not streaming, so we send one chunk
+    } catch (error) {
+        logger.error("Error generating Pollinations response:", error);
         onChunk(`[Error: ${error instanceof Error ? error.message : String(error)}]`);
     }
 };
@@ -656,10 +704,13 @@ export const streamChatResponse = async (
         logger.log("Applying system instruction override for next response.");
     }
 
-    if (config.service === 'openai') {
-        logger.log(`Using OpenAI-compatible API for character: ${character.name}`);
+    if (config.service === 'pollinations') {
+        logger.log(`Using Pollinations Text API for character: ${character.name}`);
+        await streamPollinationsChatResponse(systemInstruction, history, onChunk);
+    } else if (['openai', 'groq', 'mistral', 'openrouter', 'kobold'].includes(config.service)) {
+        logger.log(`Using OpenAI-compatible API (${config.service}) for character: ${character.name}`);
         if (!config.apiEndpoint) {
-            onChunk("Error: OpenAI-compatible API endpoint is not configured for this character.");
+            onChunk(`Error: API endpoint is not configured for service '${config.service}'. Please check character settings.`);
             return;
         }
         await streamOpenAIChatResponse(config, systemInstruction, history, onChunk);

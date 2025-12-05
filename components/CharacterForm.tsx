@@ -30,6 +30,72 @@ const defaultEmbeddingConfig: EmbeddingConfig = {
     model: 'nomic-embed-text'
 };
 
+const API_PRESETS: Record<string, { label: string, service: any, endpoint: string, models: string[], requiresKey: boolean }> = {
+    'pollinations': {
+        label: "Pollinations.ai (Free)",
+        service: "pollinations",
+        endpoint: "https://text.pollinations.ai/",
+        models: ["openai", "mistral", "karma"],
+        requiresKey: false
+    },
+    'kobold': {
+        label: "KoboldCPP / Local (Free)",
+        service: "kobold",
+        endpoint: "http://localhost:5001/v1/chat/completions",
+        models: ["default", "gemma-2b"],
+        requiresKey: false
+    },
+    'groq': {
+        label: "Groq (Free Tier)",
+        service: "groq",
+        endpoint: "https://api.groq.com/openai/v1/chat/completions",
+        models: ["llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma-7b-it"],
+        requiresKey: true
+    },
+    'mistral': {
+        label: "Mistral AI",
+        service: "mistral",
+        endpoint: "https://api.mistral.ai/v1/chat/completions",
+        models: ["mistral-tiny", "mistral-small", "mistral-medium", "mistral-large-latest"],
+        requiresKey: true
+    },
+    'openrouter': {
+        label: "OpenRouter",
+        service: "openrouter",
+        endpoint: "https://openrouter.ai/api/v1/chat/completions",
+        models: ["nousresearch/hermes-3-llama-3.1-405b", "mistralai/mistral-7b-instruct", "microsoft/wizardlm-2-8x22b"],
+        requiresKey: true
+    },
+    'huggingface': {
+        label: "Hugging Face (Inference API)",
+        service: "openai",
+        endpoint: "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct/v1/chat/completions",
+        models: ["meta-llama/Meta-Llama-3-8B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3"],
+        requiresKey: true
+    },
+    'openai': {
+        label: "OpenAI / Compatible",
+        service: "openai",
+        endpoint: "https://api.openai.com/v1/chat/completions",
+        models: ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
+        requiresKey: true
+    },
+    'gemini': {
+        label: "Google Gemini (Custom Key)",
+        service: "gemini",
+        endpoint: "",
+        models: ["gemini-2.5-flash", "gemini-3-pro-preview"],
+        requiresKey: true
+    },
+    'default': {
+        label: "Default (Gemini)",
+        service: "default",
+        endpoint: "",
+        models: ["gemini-2.5-flash"],
+        requiresKey: false // Key is managed by env
+    }
+};
+
 const examplePluginCode = `// This code runs in a secure sandbox right before this character generates a response.
 // You can use it to dynamically alter their behavior.
 // The 'nexus' object provides logging and access to hooks.
@@ -72,6 +138,7 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
   const [formState, setFormState] = useState<Character>({} as Character);
   const [voices, setVoices] = useState<any[]>([]);
   const [isGeneratingAvatar, setIsGeneratingAvatar] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<string>('default');
   
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -98,6 +165,20 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
             searchEnabled: character.searchEnabled || false,
             thinkingEnabled: character.thinkingEnabled || false,
         });
+        
+        // Attempt to determine preset from service/endpoint
+        const service = character.apiConfig?.service || 'default';
+        if (service === 'default' || service === 'gemini') {
+            setSelectedPreset(service);
+        } else {
+            const endpoint = character.apiConfig?.apiEndpoint || '';
+            const matchingPreset = Object.entries(API_PRESETS).find(([key, config]) => {
+                if (key === 'default' || key === 'gemini') return false;
+                return config.endpoint && endpoint.includes(new URL(config.endpoint).hostname);
+            });
+            setSelectedPreset(matchingPreset ? matchingPreset[0] : 'openai');
+        }
+
     } else {
         setFormState({
             id: '', // Will be set on save
@@ -131,6 +212,24 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
   
   const handleApiConfigChange = <K extends keyof ApiConfig>(key: K, value: ApiConfig[K]) => {
       setFormState(prev => ({ ...prev, apiConfig: { ...prev.apiConfig!, [key]: value }}));
+  };
+  
+  const handlePresetChange = (presetKey: string) => {
+      setSelectedPreset(presetKey);
+      const preset = API_PRESETS[presetKey];
+      if (preset) {
+          setFormState(prev => ({
+              ...prev,
+              apiConfig: {
+                  ...prev.apiConfig!,
+                  service: preset.service,
+                  apiEndpoint: preset.endpoint,
+                  model: preset.models.length > 0 ? preset.models[0] : '',
+                  // Clear key if switching to a free service that doesn't need one, otherwise keep it
+                  apiKey: preset.requiresKey ? prev.apiConfig?.apiKey : ''
+              }
+          }));
+      }
   };
   
   const handleEmbeddingConfigChange = <K extends keyof EmbeddingConfig>(key: K, value: EmbeddingConfig[K]) => {
@@ -217,6 +316,11 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
         generateAvatar(formState.physicalAppearance);
     }
   };
+  
+  const activePresetConfig = API_PRESETS[selectedPreset] || API_PRESETS['default'];
+  const showApiEndpoint = selectedPreset !== 'default' && selectedPreset !== 'gemini' && selectedPreset !== 'pollinations';
+  const showApiKey = activePresetConfig.requiresKey;
+  const showModel = selectedPreset !== 'default'; // Gemini default handles model internally usually, or fixed
 
   return (
     <div className="flex-1 flex flex-col bg-background-primary h-full">
@@ -471,83 +575,80 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
             <Section title="Chat API Configuration" defaultOpen={false}>
                 <div className="space-y-4">
                     <div>
-                        <label htmlFor="api-service" className="block text-sm font-medium text-text-primary">API Service</label>
+                        <label htmlFor="api-service" className="block text-sm font-medium text-text-primary">API Service Provider</label>
                         <select 
                             id="api-service"
-                            value={formState.apiConfig?.service || 'default'}
-                            onChange={(e) => handleApiConfigChange('service', e.target.value as ApiConfig['service'])}
+                            value={selectedPreset}
+                            onChange={(e) => handlePresetChange(e.target.value)}
                             className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md shadow-sm py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                         >
-                            <option value="default">Default (Gemini)</option>
-                            <option value="gemini">Google Gemini (Custom Key)</option>
-                            <option value="openai">OpenAI-Compatible (e.g., Ollama)</option>
+                            {Object.entries(API_PRESETS).map(([key, config]) => (
+                                <option key={key} value={key}>{config.label}</option>
+                            ))}
                         </select>
                     </div>
-                    {formState.apiConfig?.service === 'gemini' && (
+
+                    {showApiEndpoint && (
+                        <div>
+                            <label htmlFor="api-endpoint" className="block text-sm font-medium text-text-primary">API Endpoint</label>
+                            <input
+                                id="api-endpoint"
+                                type="text"
+                                value={formState.apiConfig?.apiEndpoint || ''}
+                                onChange={(e) => handleApiConfigChange('apiEndpoint', e.target.value)}
+                                className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                                placeholder="e.g., https://api.openai.com/v1/chat/completions"
+                            />
+                        </div>
+                    )}
+
+                    {showApiKey && (
                          <div>
-                            <label htmlFor="api-key" className="block text-sm font-medium text-text-primary">Gemini API Key</label>
+                            <label htmlFor="api-key" className="block text-sm font-medium text-text-primary">API Key</label>
                             <input
                                 id="api-key"
                                 type="password"
-                                value={formState.apiConfig.apiKey || ''}
+                                value={formState.apiConfig?.apiKey || ''}
                                 onChange={(e) => handleApiConfigChange('apiKey', e.target.value)}
                                 className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md shadow-sm py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                                placeholder="Enter your Gemini API key"
+                                placeholder="Enter your API key"
                             />
                         </div>
                     )}
-                     {formState.apiConfig?.service === 'openai' && (
-                        <>
-                            <div>
-                                <label htmlFor="api-endpoint" className="block text-sm font-medium text-text-primary">API Endpoint</label>
-                                <input
-                                    id="api-endpoint"
-                                    type="text"
-                                    value={formState.apiConfig.apiEndpoint || ''}
-                                    onChange={(e) => handleApiConfigChange('apiEndpoint', e.target.value)}
-                                    className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                                    placeholder="e.g., http://localhost:11434/v1/chat/completions"
-                                />
-                            </div>
-                             <div>
-                                <label htmlFor="api-key" className="block text-sm font-medium text-text-primary">API Key</label>
-                                <input
-                                    id="api-key"
-                                    type="password"
-                                    value={formState.apiConfig.apiKey || ''}
-                                    onChange={(e) => handleApiConfigChange('apiKey', e.target.value)}
-                                    className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                                    placeholder="API Key (optional for some services)"
-                                />
-                            </div>
-                            <div>
-                                <label htmlFor="api-model" className="block text-sm font-medium text-text-primary">Model Name</label>
+
+                    {showModel && (
+                        <div>
+                            <label htmlFor="api-model" className="block text-sm font-medium text-text-primary">Model Name</label>
+                            <div className="mt-1 relative">
                                 <input
                                     id="api-model"
                                     type="text"
-                                    value={formState.apiConfig.model || ''}
+                                    list="model-list"
+                                    value={formState.apiConfig?.model || ''}
                                     onChange={(e) => handleApiConfigChange('model', e.target.value)}
-                                    className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                                    placeholder="e.g., llama3"
+                                    className="block w-full bg-background-secondary border border-border-strong rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                                    placeholder="Select or type model name..."
                                 />
+                                <datalist id="model-list">
+                                    {activePresetConfig.models.map(m => <option key={m} value={m} />)}
+                                </datalist>
                             </div>
-                        </>
-                    )}
-                    {(formState.apiConfig?.service === 'gemini' || formState.apiConfig?.service === 'openai') && (
-                        <div>
-                            <label htmlFor="api-rate-limit" className="block text-sm font-medium text-text-primary">Request Delay (ms)</label>
-                            <input
-                                id="api-rate-limit"
-                                type="number"
-                                value={formState.apiConfig.rateLimit || ''}
-                                onChange={(e) => handleApiConfigChange('rateLimit', e.target.value ? parseInt(e.target.value, 10) : undefined)}
-                                className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                                placeholder="e.g., 1000 (for 1 request per second)"
-                                min="0"
-                            />
-                            <p className="text-xs text-text-secondary mt-1">Minimum time to wait between requests from this character to avoid rate limits.</p>
                         </div>
                     )}
+
+                    <div>
+                        <label htmlFor="api-rate-limit" className="block text-sm font-medium text-text-primary">Request Delay (ms)</label>
+                        <input
+                            id="api-rate-limit"
+                            type="number"
+                            value={formState.apiConfig?.rateLimit || ''}
+                            onChange={(e) => handleApiConfigChange('rateLimit', e.target.value ? parseInt(e.target.value, 10) : undefined)}
+                            className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                            placeholder="e.g., 1000 (for 1 request per second)"
+                            min="0"
+                        />
+                        <p className="text-xs text-text-secondary mt-1">Minimum time to wait between requests from this character to avoid rate limits.</p>
+                    </div>
                 </div>
             </Section>
 
