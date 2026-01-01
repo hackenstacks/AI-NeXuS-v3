@@ -1,3 +1,4 @@
+
 import { GeminiApiRequest, PluginApiResponse } from "../types";
 import { logger } from "./loggingService";
 
@@ -76,6 +77,18 @@ const workerCode = `
         }
         break;
         
+      case 'EVAL':
+        try {
+          // Wrap in async IIFE to allow await at top level of shell.
+          // NOTE: We do not prepend 'return' so user must explicit return values if desired.
+          const evalFunc = new Function('nexus', 'return (async () => { ' + payload.code + ' })();');
+          const result = await evalFunc(nexus);
+          self.postMessage({ type: 'EVAL_RESULT', ticket: payload.ticket, result: result });
+        } catch (error) {
+          self.postMessage({ type: 'EVAL_ERROR', ticket: payload.ticket, error: error.message });
+        }
+        break;
+
       case 'API_RESPONSE':
         const promise = pendingApiRequests.get(payload.ticket);
         if (promise) {
@@ -124,10 +137,10 @@ export class PluginSandbox {
         }
       } else if (ticket !== undefined && this.pendingHooks.has(ticket)) {
         const promise = this.pendingHooks.get(ticket)!;
-        if (type === 'HOOK_RESULT') {
+        if (type === 'HOOK_RESULT' || type === 'EVAL_RESULT') {
           promise.resolve(result);
-        } else if (type === 'HOOK_ERROR') {
-          logger.error(`[Plugin] Error executing hook:`, error);
+        } else if (type === 'HOOK_ERROR' || type === 'EVAL_ERROR') {
+          // logger.error(`[Plugin] Error executing code:`, error); // Optional: don't log user syntax errors as app errors
           promise.reject(new Error(error));
         }
         this.pendingHooks.delete(ticket);
@@ -158,6 +171,17 @@ export class PluginSandbox {
       this.worker.postMessage({
         type: 'EXECUTE_HOOK',
         payload: { hookName, data, ticket },
+      });
+    });
+  }
+
+  evalCode(code: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const ticket = this.ticketCounter++;
+      this.pendingHooks.set(ticket, { resolve, reject });
+      this.worker.postMessage({
+        type: 'EVAL',
+        payload: { code, ticket },
       });
     });
   }

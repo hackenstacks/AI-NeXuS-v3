@@ -21,6 +21,13 @@ import { PaletteIcon } from './icons/PaletteIcon.tsx';
 import { PaperClipIcon } from './icons/PaperClipIcon.tsx';
 import { VideoIcon } from './icons/VideoIcon.tsx';
 import { MicrophoneIcon } from './icons/MicrophoneIcon.tsx';
+import { PencilIcon } from './icons/PencilIcon.tsx';
+import { RefreshIcon } from './icons/RefreshIcon.tsx';
+import { XMarkIcon } from './icons/XMarkIcon.tsx';
+import { UsersIcon } from './icons/UsersIcon.tsx';
+import { TerminalIcon } from './icons/TerminalIcon.tsx';
+import { ManageParticipantsModal } from './ManageParticipantsModal.tsx';
+import { TerminalModal } from './TerminalModal.tsx';
 
 interface ChatInterfaceProps {
   session: ChatSession;
@@ -54,10 +61,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isStreaming, setIsStreaming] = useState(false);
   const [autoConverseStatus, setAutoConverseStatus] = useState<'stopped' | 'running' | 'paused'>('stopped');
   const [isMemoryModalVisible, setIsMemoryModalVisible] = useState(false);
+  const [isManageParticipantsVisible, setIsManageParticipantsVisible] = useState(false);
+  const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isTtsEnabled, setIsTtsEnabled] = useState(false);
   const [verifiedSignatures, setVerifiedSignatures] = useState<Record<string, boolean>>({});
   const [isImageWindowVisible, setIsImageWindowVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
+  
+  // Edit State
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState('');
 
   const nextSpeakerIndex = useRef(0);
   const systemOverride = useRef<string | null>(null);
@@ -98,6 +111,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   useEffect(() => {
     if (session.id !== currentSessionRef.current.id) {
         setCurrentSession(session);
+        setEditingMessageIndex(null);
         if (autoConverseStatusRef.current !== 'stopped') {
             setAutoConverseStatus('stopped');
             if (autoConverseTimeout.current) clearTimeout(autoConverseTimeout.current);
@@ -129,8 +143,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   }, [currentSession.messages]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentSession.messages, isStreaming]);
+    if (editingMessageIndex === null) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentSession.messages, isStreaming, editingMessageIndex]);
   
   useEffect(() => {
     // Initialize AudioContext on first interaction
@@ -453,6 +469,27 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             }
             break;
         }
+        case 'shell':
+        case 'exec': {
+            // Quick Execution Shell
+            if (participants.length === 0) {
+                addSystemMessage("No characters available to execute shell command.");
+                return;
+            }
+            addSystemMessage(`Executing shell command for ${participants[0].name}...`);
+            try {
+                const sandbox = new PluginSandbox(handlePluginApiRequest);
+                if (participants[0].pluginCode) {
+                    await sandbox.loadCode(participants[0].pluginCode);
+                }
+                const result = await sandbox.evalCode(args);
+                addSystemMessage(`Shell Result:\n${JSON.stringify(result, null, 2)}`);
+                sandbox.terminate();
+            } catch (e) {
+                addSystemMessage(`Shell Error: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            break;
+        }
         default:
             addSystemMessage(`Unknown command: /${command}`);
     }
@@ -476,6 +513,72 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return userMessage;
   };
   
+  // --- Participant Management ---
+  const handleUpdateParticipants = (selectedIds: string[]) => {
+      updateSession(prev => ({
+          ...prev,
+          characterIds: selectedIds
+      }));
+      nextSpeakerIndex.current = 0;
+  };
+
+  // --- Message Editing & Regeneration ---
+  const startEditing = (index: number, content: string) => {
+      setEditingMessageIndex(index);
+      setEditContent(content);
+  };
+
+  const cancelEditing = () => {
+      setEditingMessageIndex(null);
+      setEditContent('');
+  };
+
+  const saveEdit = async (index: number) => {
+      const oldMessage = currentSession.messages[index];
+      const newMessage = { ...oldMessage, content: editContent };
+      delete newMessage.signature;
+      delete newMessage.publicKeyJwk;
+
+      if (newMessage.role === 'user' && userKeys) {
+           try {
+                const privateKey = await cryptoService.importKey(userKeys.privateKey, 'sign');
+                newMessage.publicKeyJwk = userKeys.publicKey;
+                const dataToSign: Partial<Message> = { ...newMessage };
+                delete dataToSign.signature;
+                delete dataToSign.publicKeyJwk;
+                const canonicalString = cryptoService.createCanonicalString(dataToSign);
+                newMessage.signature = await cryptoService.sign(canonicalString, privateKey);
+            } catch(e) {
+                logger.error("Failed to re-sign user message", e);
+            }
+      }
+
+      updateSession(prev => {
+          const newMessages = [...prev.messages];
+          newMessages[index] = newMessage;
+          return { ...prev, messages: newMessages };
+      });
+      setEditingMessageIndex(null);
+  };
+
+  const regenerateResponse = async (index: number) => {
+      const messageToRegenerate = currentSession.messages[index];
+      if (messageToRegenerate.role !== 'model' || !messageToRegenerate.characterId) {
+          alert("Can only regenerate AI responses.");
+          return;
+      }
+
+      const character = allCharacters.find(c => c.id === messageToRegenerate.characterId);
+      if (!character) {
+          alert("Character not found.");
+          return;
+      }
+
+      const historyPrefix = currentSession.messages.slice(0, index);
+      updateSession(prev => ({ ...prev, messages: historyPrefix }));
+      await triggerAIResponse(character, historyPrefix);
+  };
+
   const handleSendMessage = useCallback(async () => {
     const trimmedInput = input.trim();
     if (!trimmedInput && !uploading) return;
@@ -495,7 +598,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         return;
     }
 
-    // Normal message handling is done, but now handle attachments logic outside of just text
     const userMessage = await createUserMessage(trimmedInput);
     const newHistory = [...currentSessionRef.current.messages, userMessage];
     addMessage(userMessage);
@@ -558,7 +660,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           addMessage(userMessage);
           setUploading(false);
 
-          // Trigger AI response immediately to analyze the file
           if (participants.length > 0) {
               const respondent = participants[nextSpeakerIndex.current % participants.length];
               nextSpeakerIndex.current += 1;
@@ -590,7 +691,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             ? { type: 'summary', value: prompt }
             : { type: 'direct', value: prompt };
             
-        // Use type assertion instead of explicit generic arguments to avoid parser issues
         const result = await onTriggerHook('generateImage', payload) as {url?: string, error?: string};
 
         if (result.url) {
@@ -620,7 +720,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleGenerateImageInWindow = useCallback(async (prompt: string) => {
     logger.log("Generating image in floating window for prompt:", prompt);
     const payload = { type: 'direct', value: prompt };
-    // Use type assertion instead of explicit generic arguments to avoid parser issues
     const result = await onTriggerHook('generateImage', payload) as {url?: string, error?: string};
     return result;
   }, [onTriggerHook]);
@@ -728,15 +827,48 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             }}
         />
       )}
-      <header className="flex items-center p-3 border-b border-border-neutral">
-        <div className="flex -space-x-4">
-            {participants.slice(0, 3).map(p => (
-                <img key={p.id} src={p.avatarUrl || `https://picsum.photos/seed/${p.id}/40/40`} alt={p.name} className="w-10 h-10 rounded-full border-2 border-background-primary"/>
-            ))}
+      {isManageParticipantsVisible && (
+          <ManageParticipantsModal 
+            allCharacters={allCharacters}
+            currentParticipantIds={currentSession.characterIds}
+            onSave={handleUpdateParticipants}
+            onClose={() => setIsManageParticipantsVisible(false)}
+          />
+      )}
+      {isTerminalVisible && participants.length > 0 && (
+          <TerminalModal
+            character={participants[0]} // Primary character
+            onClose={() => setIsTerminalVisible(false)}
+            handlePluginApiRequest={handlePluginApiRequest}
+          />
+      )}
+
+      <header className="flex items-center p-3 border-b border-border-neutral justify-between">
+        <div className="flex items-center min-w-0">
+            <div className="flex -space-x-4 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setIsManageParticipantsVisible(true)} title="Manage Participants">
+                {participants.slice(0, 3).map(p => (
+                    <img key={p.id} src={p.avatarUrl || `https://picsum.photos/seed/${p.id}/40/40`} alt={p.name} className="w-10 h-10 rounded-full border-2 border-background-primary"/>
+                ))}
+                {participants.length === 0 && (
+                    <div className="w-10 h-10 rounded-full bg-background-tertiary flex items-center justify-center border-2 border-background-primary text-text-secondary">
+                        <UsersIcon className="w-5 h-5"/>
+                    </div>
+                )}
+            </div>
+            <div className="ml-4 flex-1 min-w-0">
+                <h2 className="text-lg font-bold text-text-primary truncate">{session.name}</h2>
+                <p className="text-sm text-text-secondary truncate cursor-pointer hover:underline" onClick={() => setIsManageParticipantsVisible(true)}>
+                    {participants.length > 0 ? participants.map(p=>p.name).join(', ') : 'No participants'}
+                </p>
+            </div>
         </div>
-        <div className="ml-4 flex-1 min-w-0">
-          <h2 className="text-lg font-bold text-text-primary truncate">{session.name}</h2>
-          <p className="text-sm text-text-secondary truncate">{participants.map(p=>p.name).join(', ')}</p>
+        <div className="flex space-x-2">
+            <button onClick={() => setIsTerminalVisible(true)} className="p-2 text-text-secondary hover:text-primary-500 rounded-full hover:bg-background-tertiary" title="Open Character Terminal">
+                <TerminalIcon className="w-5 h-5" />
+            </button>
+            <button onClick={() => setIsManageParticipantsVisible(true)} className="p-2 text-text-secondary hover:text-primary-500 rounded-full hover:bg-background-tertiary" title="Add/Remove Characters">
+                <UsersIcon className="w-5 h-5" />
+            </button>
         </div>
       </header>
 
@@ -754,7 +886,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   <div id={msg.timestamp} className="text-sm text-text-secondary italic px-4">
                     {renderMessageContent(msg)}
                   </div>
-                  <div className="absolute top-1/2 -translate-y-1/2 right-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute top-1/2 -translate-y-1/2 right-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity space-x-1 pr-2">
                      <button onClick={() => ttsService.speak(msg.content, 'Puck')} title="Read Aloud" className="p-1 rounded-full text-text-secondary hover:bg-background-tertiary">
                         <SpeakerIcon className="w-4 h-4" />
                     </button>
@@ -765,6 +897,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             const msgCharacter = msg.characterId ? getCharacterById(msg.characterId) : null;
             const isUser = msg.role === 'user';
             const characterVoiceId = msg.role === 'model' && msgCharacter ? (msgCharacter.voiceId || msgCharacter.voiceURI) : 'Puck';
+            const isEditing = editingMessageIndex === index;
             
             return (
               <div key={index} className={`flex items-start gap-3 group ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -776,17 +909,47 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       ? 'bg-primary-600 text-text-accent'
                       : 'bg-background-secondary text-text-primary'
                   }`}>
-                  <div className="absolute top-0 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity" style={isUser ? {left: '-2rem'} : {right: '-2rem'}}>
-                     <button onClick={() => ttsService.speak(msg.content, characterVoiceId)} title="Read Aloud" className="p-1 rounded-full text-text-secondary bg-background-tertiary hover:bg-opacity-80">
-                        <SpeakerIcon className="w-4 h-4" />
-                    </button>
-                  </div>
+                  
+                  {/* Hover Actions */}
+                  {!isEditing && (
+                      <div className={`absolute top-0 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity space-x-1 ${isUser ? 'left-[-4.5rem]' : 'right-[-4.5rem]'}`}>
+                         <button onClick={() => ttsService.speak(msg.content, characterVoiceId)} title="Read Aloud" className="p-1 rounded-full text-text-secondary bg-background-tertiary hover:bg-opacity-80">
+                            <SpeakerIcon className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => startEditing(index, msg.content)} title="Edit Message" className="p-1 rounded-full text-text-secondary bg-background-tertiary hover:bg-opacity-80">
+                            <PencilIcon className="w-4 h-4" />
+                        </button>
+                        {msg.role === 'model' && (
+                            <button onClick={() => regenerateResponse(index)} title="Regenerate Response" className="p-1 rounded-full text-text-secondary bg-background-tertiary hover:bg-opacity-80">
+                                <RefreshIcon className="w-4 h-4" />
+                            </button>
+                        )}
+                      </div>
+                  )}
+
                   {msg.role === 'model' && msgCharacter && <p className="font-bold text-sm mb-1">{msgCharacter.name}</p>}
-                  <div className="break-words">
-                    {renderMessageContent(msg)}
-                  </div>
-                  {msg.signature && (
-                    <div className="absolute -bottom-2 -right-2 bg-background-primary rounded-full p-0.5">
+                  
+                  {isEditing ? (
+                      <div className="min-w-[200px]">
+                          <textarea 
+                            value={editContent} 
+                            onChange={(e) => setEditContent(e.target.value)} 
+                            className="w-full p-2 text-sm text-text-primary bg-background-primary border border-border-strong rounded focus:outline-none focus:ring-1 focus:ring-accent-yellow"
+                            rows={3}
+                          />
+                          <div className="flex justify-end space-x-2 mt-2">
+                              <button onClick={cancelEditing} className="p-1 text-text-secondary hover:text-text-primary"><XMarkIcon className="w-4 h-4"/></button>
+                              <button onClick={() => saveEdit(index)} className="p-1 text-accent-green hover:opacity-80"><CheckCircleIcon className="w-4 h-4"/></button>
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="break-words">
+                        {renderMessageContent(msg)}
+                      </div>
+                  )}
+
+                  {msg.signature && !isEditing && (
+                    <div className="absolute -bottom-2 -right-2 bg-background-primary rounded-full p-0.5 shadow-sm">
                         {verifiedSignatures[msg.timestamp] === true && <CheckCircleIcon className="w-4 h-4 text-accent-green" title="Signature Verified" />}
                         {verifiedSignatures[msg.timestamp] === false && <ExclamationTriangleIcon className="w-4 h-4 text-accent-yellow" title="Signature Invalid" />}
                     </div>

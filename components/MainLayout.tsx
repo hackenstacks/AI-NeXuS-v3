@@ -1,36 +1,37 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Character, ChatSession, AppData, Plugin, GeminiApiRequest, Message, CryptoKeys, RagSource, ConfirmationRequest, UISettings, Lorebook } from '../types';
-import { loadData, saveData } from '../services/secureStorage';
-import * as ragService from '../services/ragService';
-import { CharacterList } from './CharacterList';
-import { ChatList } from './ChatList';
-import { CharacterForm } from './CharacterForm';
-import { ChatInterface } from './ChatInterface';
-import { PluginManager } from './PluginManager';
-import { LogViewer } from './LogViewer';
-import { HelpModal } from './HelpModal';
-import { LorebookManager } from './LorebookManager';
-import { DocumentLibrary } from './DocumentLibrary'; // Import new component
-import { ChatSelectionModal } from './ChatSelectionModal';
-import { ConfirmationModal } from './ConfirmationModal';
-import { ThemeSwitcher } from './ThemeSwitcher';
-import { AppearanceModal } from './AppearanceModal';
-import { PluginSandbox } from '../services/pluginSandbox';
-import * as geminiService from '../services/geminiService';
-import * as compatibilityService from '../services/compatibilityService';
-import * as cryptoService from '../services/cryptoService';
-import { logger } from '../services/loggingService';
-import { DownloadIcon } from './icons/DownloadIcon';
-import { UploadIcon } from './icons/UploadIcon';
-import { CodeIcon } from './icons/CodeIcon';
-import { TerminalIcon } from './icons/TerminalIcon';
-import { HelpIcon } from './icons/HelpIcon';
-import { PlusIcon } from './icons/PlusIcon';
-import { ChatBubbleIcon } from './icons/ChatBubbleIcon';
-import { UsersIcon } from './icons/UsersIcon';
-import { PaletteIcon } from './icons/PaletteIcon';
-import { GlobeIcon } from './icons/GlobeIcon';
-import { FolderIcon } from './icons/FolderIcon'; // Import Folder Icon
+import { Character, ChatSession, AppData, Plugin, GeminiApiRequest, Message, CryptoKeys, RagSource, ConfirmationRequest, UISettings, Lorebook } from '../types.ts';
+import { loadData, saveData } from '../services/secureStorage.ts';
+import * as ragService from '../services/ragService.ts';
+import { CharacterList } from './CharacterList.tsx';
+import { ChatList } from './ChatList.tsx';
+import { CharacterForm } from './CharacterForm.tsx';
+import { ChatInterface } from './ChatInterface.tsx';
+import { PluginManager } from './PluginManager.tsx';
+import { LogViewer } from './LogViewer.tsx';
+import { HelpModal } from './HelpModal.tsx';
+import { LorebookManager } from './LorebookManager.tsx';
+import { DocumentLibrary } from './DocumentLibrary.tsx';
+import { ChatSelectionModal } from './ChatSelectionModal.tsx';
+import { ConfirmationModal } from './ConfirmationModal.tsx';
+import { ThemeSwitcher } from './ThemeSwitcher.tsx';
+import { AppearanceModal } from './AppearanceModal.tsx';
+import { PluginSandbox } from '../services/pluginSandbox.ts';
+import * as geminiService from '../services/geminiService.ts';
+import * as compatibilityService from '../services/compatibilityService.ts';
+import * as cryptoService from '../services/cryptoService.ts';
+import { logger } from '../services/loggingService.ts';
+import { DownloadIcon } from './icons/DownloadIcon.tsx';
+import { UploadIcon } from './icons/UploadIcon.tsx';
+import { CodeIcon } from './icons/CodeIcon.tsx';
+import { TerminalIcon } from './icons/TerminalIcon.tsx';
+import { HelpIcon } from './icons/HelpIcon.tsx';
+import { PlusIcon } from './icons/PlusIcon.tsx';
+import { ChatBubbleIcon } from './icons/ChatBubbleIcon.tsx';
+import { UsersIcon } from './icons/UsersIcon.tsx';
+import { PaletteIcon } from './icons/PaletteIcon.tsx';
+import { GlobeIcon } from './icons/GlobeIcon.tsx';
+import { FolderIcon } from './icons/FolderIcon.tsx';
 
 
 const defaultImagePlugin: Plugin = {
