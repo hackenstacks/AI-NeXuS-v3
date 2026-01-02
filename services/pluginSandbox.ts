@@ -28,6 +28,11 @@ const workerCode = `
         console.warn('Deprecated: nexus.beforeResponseGenerate() called. Use nexus.hooks.register("beforeResponseGenerate", ...) instead.');
         return payload;
     },
+    ui: {
+      setAvatarSize: (size) => {
+        self.postMessage({ type: 'UPDATE_UI', payload: { avatarSize: size } });
+      }
+    },
     // Provides a secure bridge to the main application's Gemini API services.
     gemini: {
       generateContent: (prompt) => {
@@ -112,9 +117,11 @@ export class PluginSandbox {
   private ticketCounter = 0;
   private pendingHooks = new Map<number, { resolve: (value: any) => void; reject: (reason?: any) => void }>();
   private apiRequestHandler: (request: GeminiApiRequest) => Promise<any>;
+  private onUiUpdate?: (payload: any) => void;
 
-  constructor(apiRequestHandler: (request: GeminiApiRequest) => Promise<any>) {
+  constructor(apiRequestHandler: (request: GeminiApiRequest) => Promise<any>, onUiUpdate?: (payload: any) => void) {
     this.apiRequestHandler = apiRequestHandler;
+    this.onUiUpdate = onUiUpdate;
     const blob = new Blob([workerCode], { type: 'application/javascript' });
     this.worker = new Worker(URL.createObjectURL(blob));
 
@@ -124,6 +131,10 @@ export class PluginSandbox {
       if (type === 'LOG') {
         const message = payload.map((p: any) => typeof p === 'object' ? JSON.stringify(p) : p).join(' ');
         logger.log(`[Plugin] ${message}`);
+      } else if (type === 'UPDATE_UI') {
+        if (this.onUiUpdate) {
+            this.onUiUpdate(payload);
+        }
       } else if (type === 'API_REQUEST') {
         try {
           const apiResult = await this.apiRequestHandler(payload.apiRequest);

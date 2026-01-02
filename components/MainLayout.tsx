@@ -167,7 +167,7 @@ export const MainLayout: React.FC = () => {
                 if (!data.knowledgeBase) data.knowledgeBase = [];
                 if (!data.lorebooks) data.lorebooks = [];
                 
-                // --- UI Settings Migration (from global to per-chat) ---
+                // --- UI Settings Migration (Legacy Global & String to Number) ---
                 const dataAsAny = data as any;
                 if (dataAsAny.uiSettings && Object.keys(dataAsAny.uiSettings).length > 0) {
                     logger.log("Migrating global UI settings to chat sessions...");
@@ -180,10 +180,28 @@ export const MainLayout: React.FC = () => {
                         }
                         return cs;
                     });
-                    
-                    logger.log(`Applied global UI settings to relevant chat sessions.`);
                     dataNeedsSave = true;
                 }
+
+                // Migrate string avatarSize to number
+                data.chatSessions = data.chatSessions.map(cs => {
+                    if (cs.uiSettings) {
+                        const currentSize = cs.uiSettings.avatarSize as any;
+                        if (typeof currentSize === 'string') {
+                            let newSize = 5; // Default medium
+                            if (currentSize === 'small') newSize = 3;
+                            if (currentSize === 'large') newSize = 8;
+                            
+                            // Return new object with updated size
+                            return {
+                                ...cs,
+                                uiSettings: { ...cs.uiSettings, avatarSize: newSize }
+                            };
+                        }
+                    }
+                    return cs;
+                });
+
 
                 const defaultPlugins = [defaultImagePlugin, defaultTtsPlugin];
                 if (!data.plugins) data.plugins = [];
@@ -419,7 +437,7 @@ export const MainLayout: React.FC = () => {
             name,
             characterIds,
             messages,
-            uiSettings: {},
+            uiSettings: { avatarSize: 5 }, // Default to medium (5)
             lorebookIds,
         };
         const updatedSessions = [...appData.chatSessions, newSession];

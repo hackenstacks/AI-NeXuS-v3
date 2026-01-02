@@ -27,7 +27,7 @@ export interface Message {
 export interface UISettings {
   backgroundImage?: string; // Now stores an image ID like 'nexus-image://uuid'
   bannerImage?: string; // Now stores an image ID
-  avatarSize?: 'small' | 'medium' | 'large';
+  avatarSize?: number; // 1 to 10 scale
 }
 
 export interface ChatSession {

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { UISettings, ChatSession, Character } from '../types';
 import { generateContent } from '../services/geminiService';
@@ -157,8 +158,8 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({ settings, curr
     onUpdate(newSettings);
   };
 
-  const handleAvatarSizeChange = (size: 'small' | 'medium' | 'large') => {
-    onUpdate({ ...settings, avatarSize: size });
+  const handleAvatarSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onUpdate({ ...settings, avatarSize: parseInt(e.target.value, 10) });
   };
 
   return (
@@ -206,22 +207,25 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({ settings, curr
           />
 
           <div className="space-y-3 pt-6 border-t border-border-neutral">
-            <h3 className="text-lg font-medium text-text-primary">Avatar Size</h3>
-            <p className="text-sm text-text-secondary">Controls the size of character avatars displayed next to messages in this chat.</p>
-            <div className="flex items-center space-x-4">
-                {(['small', 'medium', 'large'] as const).map(size => (
-                    <label key={size} className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                            type="radio"
-                            name="avatar-size"
-                            value={size}
-                            checked={(settings.avatarSize || 'medium') === size}
-                            onChange={() => handleAvatarSizeChange(size)}
-                            className="h-4 w-4 text-primary-600 border-border-strong bg-background-primary focus:ring-primary-500"
-                        />
-                        <span className="capitalize text-text-primary">{size}</span>
-                    </label>
-                ))}
+            <div className="flex justify-between items-center">
+                <div>
+                    <h3 className="text-lg font-medium text-text-primary">Avatar Size</h3>
+                    <p className="text-sm text-text-secondary">Controls the size of character avatars in the chat (1-10).</p>
+                </div>
+                <span className="text-primary-600 font-bold text-lg">{settings.avatarSize || 5}</span>
+            </div>
+            <input 
+                type="range" 
+                min="1" 
+                max="10" 
+                value={settings.avatarSize || 5} 
+                onChange={handleAvatarSizeChange}
+                className="w-full h-2 bg-background-tertiary rounded-lg appearance-none cursor-pointer accent-primary-600"
+            />
+            <div className="flex justify-between text-xs text-text-secondary">
+                <span>Tiny</span>
+                <span>Medium</span>
+                <span>Massive</span>
             </div>
           </div>
 

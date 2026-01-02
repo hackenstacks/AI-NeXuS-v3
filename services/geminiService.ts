@@ -535,6 +535,9 @@ const buildSystemInstruction = (character: Character, allParticipants: Character
     instruction += "You can see images and hear audio if provided. Analyze them as your character would.\n";
     instruction += "You have the ability to generate images. To do so, include a special command in your response: [generate_image: A detailed description of the image you want to create].\n\n";
     
+    instruction += "== FORMATTING ==\n";
+    instruction += "When providing code snippets, you MUST use Markdown code blocks with the appropriate language identifier (e.g., ```python, ```javascript). Ensure code is clean and explained if necessary.\n\n";
+
     instruction += "Engage in conversation based on this complete persona. Do not break character. Respond to the user's last message.";
 
     return instruction;

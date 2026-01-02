@@ -6,6 +6,7 @@ import * as cryptoService from '../services/cryptoService.ts';
 import * as ttsService from '../services/ttsService.ts';
 import * as ragService from '../services/ragService.ts';
 import * as lorebookService from '../services/lorebookService.ts';
+import { parseMarkdown } from '../services/markdownService.ts';
 import { logger } from '../services/loggingService.ts';
 import { ChatBubbleIcon } from './icons/ChatBubbleIcon.tsx';
 import { ImageIcon } from './icons/ImageIcon.tsx';
@@ -100,12 +101,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return (currentSession.lorebookIds || []).map(id => allLorebooks.find(lb => lb.id === id)).filter(Boolean) as Lorebook[];
   }, [allLorebooks, currentSession.lorebookIds]);
 
-  const avatarSizeClass = useMemo(() => {
-    switch (currentSession.uiSettings?.avatarSize) {
-      case 'small': return 'w-8 h-8';
-      case 'large': return 'w-12 h-12';
-      default: return 'w-10 h-10'; // Medium is default
-    }
+  const avatarSizeStyle = useMemo(() => {
+    const size = currentSession.uiSettings?.avatarSize || 5;
+    // Base size 1.5rem + (size * 0.4rem). Range: 1=1.9rem, 5=3.5rem, 10=5.5rem
+    const dimension = `${1.5 + (size * 0.4)}rem`;
+    return { width: dimension, height: dimension };
   }, [currentSession.uiSettings?.avatarSize]);
 
   useEffect(() => {
@@ -185,6 +185,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     addMessage(systemMessage);
   }, [addMessage]);
   
+  // Handler for UI updates from plugins (e.g. setting avatar size)
+  const handlePluginUiUpdate = useCallback((payload: any) => {
+      if (payload.avatarSize !== undefined) {
+          const newSize = Math.max(1, Math.min(10, Number(payload.avatarSize)));
+          updateSession(curr => ({
+              ...curr,
+              uiSettings: { ...curr.uiSettings, avatarSize: newSize }
+          }));
+          logger.log(`Plugin updated avatar size to ${newSize}`);
+      }
+  }, [updateSession]);
+
   const triggerAIResponse = useCallback(async (character: Character, history: Message[], override?: string) => {
     if (history.filter(m => m.content || m.attachment).length === 0) {
       addSystemMessage("AI cannot respond to an empty history.");
@@ -207,7 +219,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (character.pluginEnabled && character.pluginCode) {
         addSystemMessage(`Executing character logic for ${character.name}...`);
         try {
-            const sandbox = new PluginSandbox(handlePluginApiRequest);
+            const sandbox = new PluginSandbox(handlePluginApiRequest, handlePluginUiUpdate);
             await sandbox.loadCode(character.pluginCode);
             
             const hookPayload = { history, systemOverride: finalOverride };
@@ -248,9 +260,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 const lastMessage = messages[messages.length - 1];
                 if(lastMessage && lastMessage.timestamp === modelPlaceholder.timestamp) {
                     lastMessage.content = fullResponse;
+                    // Force update for streaming effect using the markdown parser
                     const msgElement = document.getElementById(modelPlaceholder.timestamp);
                     if (msgElement) {
-                       msgElement.innerHTML = fullResponse.replace(/\n/g, '<br>');
+                       msgElement.innerHTML = parseMarkdown(fullResponse);
                     }
                 }
             },
@@ -308,7 +321,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             }));
         }
     }
-  }, [participants, isTtsEnabled, updateSession, addSystemMessage, handlePluginApiRequest, attachedLorebooks]);
+  }, [participants, isTtsEnabled, updateSession, addSystemMessage, handlePluginApiRequest, attachedLorebooks, handlePluginUiUpdate]);
 
   const continueAutoConversation = useCallback(async () => {
     if (autoConverseTimeout.current) clearTimeout(autoConverseTimeout.current);
@@ -478,7 +491,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             }
             addSystemMessage(`Executing shell command for ${participants[0].name}...`);
             try {
-                const sandbox = new PluginSandbox(handlePluginApiRequest);
+                const sandbox = new PluginSandbox(handlePluginApiRequest, handlePluginUiUpdate);
                 if (participants[0].pluginCode) {
                     await sandbox.loadCode(participants[0].pluginCode);
                 }
@@ -747,7 +760,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             fullResponse += chunk;
             const msgElement = document.getElementById(narratorPlaceholder.timestamp);
             if (msgElement) {
-                msgElement.innerHTML = fullResponse.replace(/\n/g, '<br>');
+                msgElement.innerHTML = parseMarkdown(fullResponse);
             }
         }
     );
@@ -801,7 +814,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
              return <audio src={message.attachment.url} controls className="mb-2" />;
         }
     }
-    return <span id={message.timestamp} dangerouslySetInnerHTML={{ __html: message.content.replace(/\n/g, '<br />') }} />;
+    // Use the markdown parsing service instead of just replacing newlines
+    // Changed span to div to support block-level elements like 'pre'
+    return <div id={message.timestamp} className="markdown-body" dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }} />;
   };
   
   const getCharacterById = (id: string) => allCharacters.find(c => c.id === id);
@@ -847,7 +862,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div className="flex items-center min-w-0">
             <div className="flex -space-x-4 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setIsManageParticipantsVisible(true)} title="Manage Participants">
                 {participants.slice(0, 3).map(p => (
-                    <img key={p.id} src={p.avatarUrl || `https://picsum.photos/seed/${p.id}/40/40`} alt={p.name} className="w-10 h-10 rounded-full border-2 border-background-primary"/>
+                    <img key={p.id} src={p.avatarUrl || `https://picsum.photos/seed/${p.id}/40/40`} alt={p.name} className={`rounded-full border-2 border-background-primary object-cover ${participants.length > 1 ? 'w-10 h-10' : ''}`} style={participants.length === 1 ? avatarSizeStyle : {}}/>
                 ))}
                 {participants.length === 0 && (
                     <div className="w-10 h-10 rounded-full bg-background-tertiary flex items-center justify-center border-2 border-background-primary text-text-secondary">
@@ -902,7 +917,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             return (
               <div key={index} className={`flex items-start gap-3 group ${isUser ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'model' && msgCharacter && (
-                  <img src={msgCharacter.avatarUrl || `https://picsum.photos/seed/${msgCharacter.id}/40/40`} alt={msgCharacter.name} className={`${avatarSizeClass} rounded-full flex-shrink-0`} title={msgCharacter.name}/>
+                  <img src={msgCharacter.avatarUrl || `https://picsum.photos/seed/${msgCharacter.id}/40/40`} alt={msgCharacter.name} className={`rounded-full flex-shrink-0 object-cover`} style={avatarSizeStyle} title={msgCharacter.name}/>
                 )}
                 <div className={`relative max-w-xl p-3 rounded-lg ${
                     isUser
