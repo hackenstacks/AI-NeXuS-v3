@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Character, ChatSession, AppData, Plugin, GeminiApiRequest, Message, CryptoKeys, RagSource, ConfirmationRequest, UISettings, Lorebook } from '../types.ts';
+import { Character, ChatSession, AppData, Plugin, GeminiApiRequest, Message, CryptoKeys, RagSource, ConfirmationRequest, UISettings, Lorebook, UserProfile } from '../types.ts';
 import { loadData, saveData } from '../services/secureStorage.ts';
 import * as ragService from '../services/ragService.ts';
 import { CharacterList } from './CharacterList.tsx';
@@ -16,6 +16,7 @@ import { ChatSelectionModal } from './ChatSelectionModal.tsx';
 import { ConfirmationModal } from './ConfirmationModal.tsx';
 import { ThemeSwitcher } from './ThemeSwitcher.tsx';
 import { AppearanceModal } from './AppearanceModal.tsx';
+import { UserProfileModal } from './UserProfileModal.tsx';
 import { PluginSandbox } from '../services/pluginSandbox.ts';
 import * as geminiService from '../services/geminiService.ts';
 import * as compatibilityService from '../services/compatibilityService.ts';
@@ -32,6 +33,7 @@ import { UsersIcon } from './icons/UsersIcon.tsx';
 import { PaletteIcon } from './icons/PaletteIcon.tsx';
 import { GlobeIcon } from './icons/GlobeIcon.tsx';
 import { FolderIcon } from './icons/FolderIcon.tsx';
+import { UserIcon } from './icons/UserIcon.tsx';
 
 
 const defaultImagePlugin: Plugin = {
@@ -112,6 +114,7 @@ export const MainLayout: React.FC = () => {
     const [isHelpVisible, setIsHelpVisible] = useState(false);
     const [isChatModalVisible, setIsChatModalVisible] = useState(false);
     const [isAppearanceModalVisible, setIsAppearanceModalVisible] = useState(false);
+    const [isUserProfileVisible, setIsUserProfileVisible] = useState(false);
     const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null);
 
     const [showArchivedChats, setShowArchivedChats] = useState(false);
@@ -166,6 +169,7 @@ export const MainLayout: React.FC = () => {
                 // --- Data Normalization ---
                 if (!data.knowledgeBase) data.knowledgeBase = [];
                 if (!data.lorebooks) data.lorebooks = [];
+                if (!data.userProfile) data.userProfile = { name: 'User' };
                 
                 // --- UI Settings Migration (Legacy Global & String to Number) ---
                 const dataAsAny = data as any;
@@ -423,9 +427,11 @@ export const MainLayout: React.FC = () => {
         if (characterIds.length === 1) {
             const character = appData.characters.find(c => c.id === characterIds[0]);
             if (character && character.firstMessage) {
+                // Replace {{user}} with the actual user name if available, otherwise 'You'
+                const userName = appData.userProfile?.name || 'You';
                 messages.push({
                     role: 'model',
-                    content: character.firstMessage.replace(/{{user}}/g, 'You'),
+                    content: character.firstMessage.replace(/{{user}}/g, userName),
                     timestamp: new Date().toISOString(),
                     characterId: character.id
                 });
@@ -537,6 +543,13 @@ export const MainLayout: React.FC = () => {
         const updatedData = { ...appData, knowledgeBase: docs };
         setAppData(updatedData);
         persistData(updatedData);
+    };
+
+    const handleUpdateUserProfile = (profile: UserProfile) => {
+        const updatedData = { ...appData, userProfile: profile };
+        setAppData(updatedData);
+        persistData(updatedData);
+        logger.log("User profile updated.");
     };
 
     const triggerDownload = (filename: string, data: object) => {
@@ -920,6 +933,7 @@ export const MainLayout: React.FC = () => {
                         allChatSessions={appData.chatSessions}
                         allLorebooks={appData.lorebooks || []}
                         userKeys={appData.userKeys}
+                        userProfile={appData.userProfile}
                         onSessionUpdate={handleSessionUpdate}
                         onTriggerHook={triggerPluginHook}
                         onCharacterUpdate={handleCharacterUpdate}
@@ -1019,6 +1033,14 @@ export const MainLayout: React.FC = () => {
                     onClose={() => setIsAppearanceModalVisible(false)}
                 />
             )}
+            {isUserProfileVisible && (
+                <UserProfileModal
+                    profile={appData.userProfile}
+                    onSave={handleUpdateUserProfile}
+                    onClose={() => setIsUserProfileVisible(false)}
+                    onGenerateImage={handleGenerateImage}
+                />
+            )}
             {confirmationRequest && (
                 <ConfirmationModal 
                     message={confirmationRequest.message}
@@ -1047,6 +1069,9 @@ export const MainLayout: React.FC = () => {
 
                     <div className="w-8 border-t border-border-neutral my-2"></div>
                     
+                    <button onClick={() => setIsUserProfileVisible(true)} title="User Profile" className="p-2 rounded-lg text-text-secondary hover:bg-background-tertiary">
+                        <UserIcon className="w-6 h-6" />
+                    </button>
                     <button onClick={() => setIsAppearanceModalVisible(true)} title="Appearance Settings" className="p-2 rounded-lg text-text-secondary hover:bg-background-tertiary">
                         <PaletteIcon className="w-6 h-6" />
                     </button>

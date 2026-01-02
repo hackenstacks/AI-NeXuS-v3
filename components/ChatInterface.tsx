@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Character, ChatSession, Message, CryptoKeys, GeminiApiRequest, Lorebook } from '../types.ts';
+import { Character, ChatSession, Message, CryptoKeys, GeminiApiRequest, Lorebook, UserProfile } from '../types.ts';
 import { streamChatResponse, streamGenericResponse, generateContent } from '../services/geminiService.ts';
 import * as cryptoService from '../services/cryptoService.ts';
 import * as ttsService from '../services/ttsService.ts';
@@ -36,6 +36,7 @@ interface ChatInterfaceProps {
   allChatSessions: ChatSession[];
   allLorebooks: Lorebook[];
   userKeys?: CryptoKeys;
+  userProfile?: UserProfile;
   onSessionUpdate: (session: ChatSession) => void;
   onCharacterUpdate: (character: Character) => void;
   onTriggerHook: <T, R>(hookName: string, data: T) => Promise<R>;
@@ -50,6 +51,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     allChatSessions,
     allLorebooks,
     userKeys, 
+    userProfile,
     onSessionUpdate, 
     onCharacterUpdate, 
     onTriggerHook,
@@ -68,6 +70,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [verifiedSignatures, setVerifiedSignatures] = useState<Record<string, boolean>>({});
   const [isImageWindowVisible, setIsImageWindowVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [generatingSelfieFor, setGeneratingSelfieFor] = useState<string | null>(null);
   
   // Edit State
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
@@ -275,11 +278,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     } finally {
         setIsStreaming(false);
 
+        // Regex for Image Generation: [generate_image: prompt]
         const imageRegex = /\[generate_image:\s*(.*?)\]/g;
-        const imageMatches = [...fullResponse.matchAll(imageRegex)];
-        const cleanedResponse = fullResponse.replace(imageRegex, '').trim();
+        // Regex for Dynamic Avatar/Selfie: [selfie: description]
+        const selfieRegex = /\[selfie:\s*(.*?)\]/g;
 
-        if (cleanedResponse.length > 0 || imageMatches.length > 0) {
+        const imageMatches = [...fullResponse.matchAll(imageRegex)];
+        const selfieMatches = [...fullResponse.matchAll(selfieRegex)];
+        
+        let cleanedResponse = fullResponse.replace(imageRegex, '').replace(selfieRegex, '').trim();
+
+        if (cleanedResponse.length > 0 || imageMatches.length > 0 || selfieMatches.length > 0) {
             let finalMessage: Message = { ...modelPlaceholder, content: cleanedResponse };
             
             if (character.keys) {
@@ -314,6 +323,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     handleImageGeneration(prompt, 'direct');
                 }
             }
+
+            for (const match of selfieMatches) {
+                const description = match[1];
+                if (description) {
+                    handleDynamicSelfie(character, description, finalMessage.timestamp);
+                }
+            }
+
         } else {
             updateSession(current => ({
                 ...current,
@@ -322,6 +339,55 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         }
     }
   }, [participants, isTtsEnabled, updateSession, addSystemMessage, handlePluginApiRequest, attachedLorebooks, handlePluginUiUpdate]);
+
+  const handleDynamicSelfie = async (character: Character, description: string, messageTimestamp: string) => {
+        setGeneratingSelfieFor(messageTimestamp);
+        
+        try {
+            const seed = character.appearanceSeed || Math.floor(Math.random() * 99999999);
+            // Ensure character has a seed for future consistency
+            if (!character.appearanceSeed) {
+                onCharacterUpdate({ ...character, appearanceSeed: seed });
+            }
+
+            const baseAppearance = character.physicalAppearance || `A character named ${character.name}`;
+            // Use specific prompt structure to maintain face but change outfit/expression
+            const combinedPrompt = `Portrait of ${baseAppearance}, ${description}`;
+            
+            logger.log(`Generating dynamic avatar for ${character.name}. Seed: ${seed}`, combinedPrompt);
+
+            // Trigger the plugin hook with the seed in settings
+            const payload = { 
+                type: 'direct', 
+                value: combinedPrompt, 
+                settings: { 
+                    seed: seed, // Pass seed to plugin (Gemini/Stable Diffusion)
+                    aspectRatio: "1:1"
+                } 
+            };
+            
+            const result = await onTriggerHook('generateImage', payload) as {url?: string, error?: string};
+
+            if (result.url) {
+                updateSession(curr => {
+                    const updatedMessages = curr.messages.map(m => {
+                        if (m.timestamp === messageTimestamp) {
+                            return { ...m, avatarOverride: result.url };
+                        }
+                        return m;
+                    });
+                    return { ...curr, messages: updatedMessages };
+                });
+            } else {
+                logger.error("Selfie generation returned no URL.");
+            }
+
+        } catch (e) {
+            logger.error("Failed to generate dynamic selfie", e);
+        } finally {
+            setGeneratingSelfieFor(null);
+        }
+  };
 
   const continueAutoConversation = useCallback(async () => {
     if (autoConverseTimeout.current) clearTimeout(autoConverseTimeout.current);
@@ -914,10 +980,33 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             const characterVoiceId = msg.role === 'model' && msgCharacter ? (msgCharacter.voiceId || msgCharacter.voiceURI) : 'Puck';
             const isEditing = editingMessageIndex === index;
             
+            // Determine avatar to show
+            let displayAvatarUrl = `https://picsum.photos/seed/${msg.role}/40/40`;
+            if (msg.role === 'model' && msgCharacter) {
+                displayAvatarUrl = msg.avatarOverride || msgCharacter.avatarUrl;
+            } else if (msg.role === 'user' && userProfile?.avatarUrl) {
+                displayAvatarUrl = userProfile.avatarUrl;
+            }
+
+            const isGeneratingThisSelfie = generatingSelfieFor === msg.timestamp;
+
             return (
               <div key={index} className={`flex items-start gap-3 group ${isUser ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'model' && msgCharacter && (
-                  <img src={msgCharacter.avatarUrl || `https://picsum.photos/seed/${msgCharacter.id}/40/40`} alt={msgCharacter.name} className={`rounded-full flex-shrink-0 object-cover`} style={avatarSizeStyle} title={msgCharacter.name}/>
+                  <div className="relative">
+                      <img 
+                        src={displayAvatarUrl} 
+                        alt={msgCharacter.name} 
+                        className={`rounded-full flex-shrink-0 object-cover ${msg.avatarOverride ? 'ring-2 ring-accent-yellow' : ''}`} 
+                        style={avatarSizeStyle} 
+                        title={msg.avatarOverride ? 'Dynamic Avatar (Selfie)' : msgCharacter.name}
+                      />
+                      {isGeneratingThisSelfie && (
+                          <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                      )}
+                  </div>
                 )}
                 <div className={`relative max-w-xl p-3 rounded-lg ${
                     isUser
@@ -970,6 +1059,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     </div>
                   )}
                 </div>
+                {/* User Avatar - rendered on the right */}
+                {isUser && (
+                    <div className="relative">
+                        <img 
+                            src={displayAvatarUrl} 
+                            alt="You" 
+                            className="rounded-full flex-shrink-0 object-cover" 
+                            style={avatarSizeStyle} 
+                        />
+                    </div>
+                )}
               </div>
             );
           })

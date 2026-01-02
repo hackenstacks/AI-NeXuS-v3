@@ -251,6 +251,8 @@ const buildImagePrompt = (prompt: string, settings: { [key: string]: any }): str
         }
     }
     const negativePrompt = settings.negativePrompt ? `. Negative prompt: ${settings.negativePrompt}` : '';
+    // Append seed info to prompt for logging/context, though API usage is specific
+    // Note: Most modern APIs take seed as a separate JSON parameter, not in prompt string.
     return `${stylePrompt}${prompt}${negativePrompt}`;
 };
 
@@ -320,18 +322,25 @@ const generateOpenAIImage = async (prompt: string, settings: { [key: string]: an
 
     const fullPrompt = buildImagePrompt(prompt, settings);
 
-    const body = JSON.stringify({
+    const body: any = {
         model: model,
         prompt: fullPrompt,
         n: 1,
         size: "1024x1024",
         response_format: "b64_json"
-    });
+    };
+
+    // Pass seed if available (supported by DALL-E 3)
+    if (settings.seed) {
+        body.style = "natural"; // DALL-E 3 specific optimization
+        // Note: OpenAI API doesn't formally support 'seed' for Images widely yet, 
+        // but some compatible endpoints might. We add it just in case.
+    }
 
     const response = await fetchWithRetry(apiEndpoint, {
         method: 'POST',
         headers,
-        body
+        body: JSON.stringify(body)
     });
 
     if (!response.ok) {
@@ -353,8 +362,13 @@ const generateOpenAIImage = async (prompt: string, settings: { [key: string]: an
 const generatePollinationsImage = async (prompt: string, settings: { [key: string]: any }): Promise<string> => {
     const model = settings.model || 'flux';
     const fullPrompt = buildImagePrompt(prompt, settings);
-    const encodedPrompt = encodeURIComponent(fullPrompt);
-    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&nologo=true`;
+    let encodedPrompt = encodeURIComponent(fullPrompt);
+    
+    // Pollinations supports seed via URL parameter
+    let url = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&nologo=true`;
+    if (settings.seed) {
+        url += `&seed=${settings.seed}`;
+    }
     
     try {
         const response = await fetchWithRetry(url, { method: 'GET' });
@@ -381,11 +395,17 @@ const generateHuggingFaceImage = async (prompt: string, settings: { [key: string
     }
 
     const fullPrompt = buildImagePrompt(prompt, settings);
+    
+    const body: any = { inputs: fullPrompt };
+    if (settings.seed) {
+        // HF Inference API usually takes parameters.seed
+        body.parameters = { seed: settings.seed };
+    }
 
     const response = await fetchWithRetry(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ inputs: fullPrompt })
+        body: JSON.stringify(body)
     });
 
     if (!response.ok) {
@@ -406,6 +426,19 @@ const generateStabilityImage = async (prompt: string, settings: { [key: string]:
     const url = `https://api.stability.ai/v1/generation/${model}/text-to-image`;
     const fullPrompt = buildImagePrompt(prompt, settings);
 
+    const body: any = {
+        text_prompts: [{ text: fullPrompt }],
+        cfg_scale: 7,
+        height: 1024,
+        width: 1024,
+        samples: 1,
+        steps: 30,
+    };
+    
+    if (settings.seed) {
+        body.seed = settings.seed;
+    }
+
     const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: {
@@ -413,14 +446,7 @@ const generateStabilityImage = async (prompt: string, settings: { [key: string]:
             Accept: 'application/json',
             Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-            text_prompts: [{ text: fullPrompt }],
-            cfg_scale: 7,
-            height: 1024,
-            width: 1024,
-            samples: 1,
-            steps: 30,
-        }),
+        body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -440,6 +466,23 @@ const generateAIHordeImage = async (prompt: string, settings: { [key: string]: a
     const model = settings.model || 'stable_diffusion';
     const fullPrompt = buildImagePrompt(prompt, settings);
     
+    const body: any = {
+        prompt: fullPrompt,
+        params: {
+            n: 1,
+            steps: 20,
+            width: 512,
+            height: 512,
+        },
+        models: [model],
+        nsfw: true,
+        censor_nsfw: false,
+    };
+
+    if (settings.seed) {
+        body.params.seed = String(settings.seed);
+    }
+
     const initResponse = await fetchWithRetry('https://stablehorde.net/api/v2/generate/async', {
         method: 'POST',
         headers: {
@@ -447,18 +490,7 @@ const generateAIHordeImage = async (prompt: string, settings: { [key: string]: a
             'apikey': apiKey,
             'Client-Agent': 'AI_Nexus:1.0:Unknown',
         },
-        body: JSON.stringify({
-            prompt: fullPrompt,
-            params: {
-                n: 1,
-                steps: 20,
-                width: 512,
-                height: 512,
-            },
-            models: [model],
-            nsfw: true,
-            censor_nsfw: false,
-        })
+        body: JSON.stringify(body)
     });
 
     if (!initResponse.ok) {
@@ -533,7 +565,17 @@ const buildSystemInstruction = (character: Character, allParticipants: Character
         instruction += "You have access to Google Search to find real-time information. Use it when the user asks about current events or factual topics.\n";
     }
     instruction += "You can see images and hear audio if provided. Analyze them as your character would.\n";
-    instruction += "You have the ability to generate images. To do so, include a special command in your response: [generate_image: A detailed description of the image you want to create].\n\n";
+    instruction += "You have the ability to generate images. To do so, include a special command in your response: [generate_image: A detailed description of the image you want to create].\n";
+    
+    // Explicit Instruction for Dynamic Selfies
+    instruction += "== DYNAMIC AVATAR ==\n";
+    instruction += "You can change your avatar expression or outfit dynamically during the chat to reflect your current mood or actions. To do this, include this tag in your response:\n";
+    instruction += "[selfie: description of your expression or outfit]\n";
+    instruction += "Examples:\n";
+    instruction += " - To look happy: \"[selfie: smiling happily]\"\n";
+    instruction += " - To change clothes: \"[selfie: wearing a winter coat and scarf]\"\n";
+    instruction += " - Combined: \"[selfie: looking angry, wearing a red armor]\"\n";
+    instruction += "The system will combine your permanent Physical Appearance with this description to generate a consistent image of YOU in this new state. Use this feature frequently to make the conversation more immersive.\n\n";
     
     instruction += "== FORMATTING ==\n";
     instruction += "When providing code snippets, you MUST use Markdown code blocks with the appropriate language identifier (e.g., ```python, ```javascript). Ensure code is clean and explained if necessary.\n\n";

@@ -6,11 +6,18 @@ export interface CryptoKeys {
     privateKey: JsonWebKey;
 }
 
+export interface UserProfile {
+  name: string;
+  avatarUrl?: string; // Image ID or Base64
+  appearance?: string; // Description for auto-generation
+}
+
 export interface Message {
   role: 'user' | 'model' | 'narrator';
   content: string;
   timestamp: string;
   characterId?: string; // Identifies which character sent a 'model' message
+  avatarOverride?: string; // New: Allows this specific message to have a different avatar (expression/outfit)
   attachment?: {
     type: 'image' | 'audio' | 'video';
     status: 'loading' | 'done' | 'error';
@@ -75,6 +82,7 @@ export interface Character {
   apiConfig?: ApiConfig;
   // New fields for more detailed characters
   physicalAppearance?: string;
+  appearanceSeed?: number; // New: Seed for consistent image generation
   personalityTraits?: string; // Comma-separated
   lore?: string[];
   memory?: string;
@@ -135,6 +143,7 @@ export interface AppData {
   knowledgeBase?: RagSource[]; // New: Centralized document library
   // New security field
   userKeys?: CryptoKeys;
+  userProfile?: UserProfile; // New: User identity
 }
 
 // Types for the secure plugin API bridge

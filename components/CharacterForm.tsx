@@ -7,6 +7,7 @@ import { logger } from '../services/loggingService.ts';
 import { UploadIcon } from './icons/UploadIcon.tsx';
 import { SparklesIcon } from './icons/SparklesIcon.tsx';
 import { SpinnerIcon } from './icons/SpinnerIcon.tsx';
+import { RefreshIcon } from './icons/RefreshIcon.tsx';
 
 interface CharacterFormProps {
   character: Character | null;
@@ -161,9 +162,10 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
             apiConfig: character.apiConfig || defaultApiConfig,
             pluginEnabled: character.pluginEnabled || false,
             pluginCode: character.pluginCode || '',
-            voiceId: character.voiceId || character.voiceURI || 'Puck', // Fallback to old URI or default
+            voiceId: character.voiceId || character.voiceURI || 'Puck',
             searchEnabled: character.searchEnabled || false,
             thinkingEnabled: character.thinkingEnabled || false,
+            appearanceSeed: character.appearanceSeed || Math.floor(Math.random() * 999999),
         });
         
         // Attempt to determine preset from service/endpoint
@@ -202,6 +204,7 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
             pluginCode: examplePluginCode,
             searchEnabled: false,
             thinkingEnabled: false,
+            appearanceSeed: Math.floor(Math.random() * 999999),
         });
     }
   }, [character]);
@@ -429,15 +432,39 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
             <Section title="Persona & Prompting">
                  <div>
                   <label htmlFor="physicalAppearance" className="block text-sm font-medium text-text-primary">Physical Appearance</label>
+                  <p className="text-xs text-text-secondary mb-1">Used as the base for all dynamic avatar generation. Be descriptive.</p>
                   <textarea
                     id="physicalAppearance"
                     value={formState.physicalAppearance || ''}
                     onChange={(e) => handleFormChange('physicalAppearance', e.target.value)}
                     rows={3}
                     className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md shadow-sm py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                    placeholder="Describe the character's physical appearance in detail."
+                    placeholder="E.g., A young woman with blue cybernetic eyes, shoulder-length silver hair, wearing a high-tech pilot suit."
                   />
                 </div>
+                <div>
+                    <label htmlFor="appearanceSeed" className="block text-sm font-medium text-text-primary">Visual Consistency Seed</label>
+                    <div className="flex space-x-2 mt-1">
+                        <input
+                            id="appearanceSeed"
+                            type="number"
+                            value={formState.appearanceSeed || ''}
+                            onChange={(e) => handleFormChange('appearanceSeed', parseInt(e.target.value))}
+                            className="block w-full bg-background-secondary border border-border-strong rounded-md shadow-sm py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                            placeholder="Random Seed"
+                        />
+                        <button 
+                            type="button" 
+                            onClick={() => handleFormChange('appearanceSeed', Math.floor(Math.random() * 999999999))}
+                            className="p-2 bg-background-tertiary rounded-md text-text-secondary hover:text-text-primary"
+                            title="Randomize Seed"
+                        >
+                            <RefreshIcon className="w-5 h-5"/>
+                        </button>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-1">This number ensures the character's face stays consistent when they generate dynamic selfies.</p>
+                </div>
+
                 <div>
                   <label htmlFor="personalityTraits" className="block text-sm font-medium text-text-primary">Personality Traits</label>
                   <input
