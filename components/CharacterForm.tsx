@@ -18,8 +18,8 @@ interface CharacterFormProps {
 }
 
 const defaultApiConfig: ApiConfig = {
-    service: 'default',
-    apiKey: '',
+    service: 'aihorde',
+    apiKey: '0000000000',
     apiEndpoint: '',
     model: ''
 };
@@ -32,12 +32,19 @@ const defaultEmbeddingConfig: EmbeddingConfig = {
 };
 
 const API_PRESETS: Record<string, { label: string, service: any, endpoint: string, models: string[], requiresKey: boolean }> = {
+    'aihorde': {
+        label: "AI Horde (Default)",
+        service: "aihorde",
+        endpoint: "https://stablehorde.net/api/v2/generate/text/async",
+        models: ["koboldcpp/Llama-3-8B-Instruct-Q8_0", "aphrodite/PygmalionAI/mythalion-13b"], 
+        requiresKey: true
+    },
     'pollinations': {
-        label: "Pollinations.ai (Free)",
-        service: "pollinations",
-        endpoint: "https://text.pollinations.ai/",
-        models: ["openai", "mistral", "karma"],
-        requiresKey: false
+        label: "Pollinations.ai",
+        service: "openai", // Use OpenAI compatibility
+        endpoint: "https://text.pollinations.ai/openai",
+        models: ["openai", "mistral", "karma", "command-r"],
+        requiresKey: true
     },
     'kobold': {
         label: "KoboldCPP / Local (Free)",
@@ -89,7 +96,7 @@ const API_PRESETS: Record<string, { label: string, service: any, endpoint: strin
         requiresKey: true
     },
     'default': {
-        label: "Default (Gemini)",
+        label: "Google Gemini (Env Key)",
         service: "default",
         endpoint: "",
         models: ["gemini-2.5-flash"],
@@ -139,7 +146,7 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
   const [formState, setFormState] = useState<Character>({} as Character);
   const [voices, setVoices] = useState<any[]>([]);
   const [isGeneratingAvatar, setIsGeneratingAvatar] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<string>('default');
+  const [selectedPreset, setSelectedPreset] = useState<string>('aihorde');
   
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -169,13 +176,13 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
         });
         
         // Attempt to determine preset from service/endpoint
-        const service = character.apiConfig?.service || 'default';
-        if (service === 'default' || service === 'gemini') {
+        const service = character.apiConfig?.service || 'aihorde';
+        if (service === 'default' || service === 'gemini' || service === 'aihorde') {
             setSelectedPreset(service);
         } else {
             const endpoint = character.apiConfig?.apiEndpoint || '';
             const matchingPreset = Object.entries(API_PRESETS).find(([key, config]) => {
-                if (key === 'default' || key === 'gemini') return false;
+                if (key === 'default' || key === 'gemini' || key === 'aihorde') return false;
                 return config.endpoint && endpoint.includes(new URL(config.endpoint).hostname);
             });
             setSelectedPreset(matchingPreset ? matchingPreset[0] : 'openai');
@@ -228,8 +235,8 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
                   service: preset.service,
                   apiEndpoint: preset.endpoint,
                   model: preset.models.length > 0 ? preset.models[0] : '',
-                  // Clear key if switching to a free service that doesn't need one, otherwise keep it
-                  apiKey: preset.requiresKey ? prev.apiConfig?.apiKey : ''
+                  // If switching to AI Horde, default to anonymous key if empty
+                  apiKey: presetKey === 'aihorde' && !prev.apiConfig?.apiKey ? '0000000000' : (preset.requiresKey ? prev.apiConfig?.apiKey : '')
               }
           }));
       }
@@ -321,7 +328,7 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
   };
   
   const activePresetConfig = API_PRESETS[selectedPreset] || API_PRESETS['default'];
-  const showApiEndpoint = selectedPreset !== 'default' && selectedPreset !== 'gemini' && selectedPreset !== 'pollinations';
+  const showApiEndpoint = selectedPreset !== 'default' && selectedPreset !== 'gemini' && selectedPreset !== 'aihorde';
   const showApiKey = activePresetConfig.requiresKey;
   const showModel = selectedPreset !== 'default'; // Gemini default handles model internally usually, or fixed
 
@@ -638,7 +645,7 @@ export const CharacterForm: React.FC<CharacterFormProps> = ({ character, onSave,
                                 value={formState.apiConfig?.apiKey || ''}
                                 onChange={(e) => handleApiConfigChange('apiKey', e.target.value)}
                                 className="mt-1 block w-full bg-background-secondary border border-border-strong rounded-md shadow-sm py-2 px-3 text-text-primary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                                placeholder="Enter your API key"
+                                placeholder={selectedPreset === 'aihorde' ? '0000000000 for Anonymous' : 'Enter API Key'}
                             />
                         </div>
                     )}

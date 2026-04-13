@@ -48,7 +48,7 @@ export interface ChatSession {
 }
 
 export interface ApiConfig {
-  service: 'default' | 'gemini' | 'openai' | 'pollinations' | 'kobold' | 'groq' | 'mistral' | 'openrouter';
+  service: 'default' | 'gemini' | 'openai' | 'pollinations' | 'kobold' | 'groq' | 'mistral' | 'openrouter' | 'aihorde' | 'huggingface';
   apiKey?: string;
   apiEndpoint?: string; // Base URL for OpenAI-compatible
   model?: string;

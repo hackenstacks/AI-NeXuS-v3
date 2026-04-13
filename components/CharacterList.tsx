@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Character } from '../types.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
@@ -34,90 +35,90 @@ export const CharacterList: React.FC<CharacterListProps> = ({
 }) => {
   return (
     <div className="flex-1 flex flex-col min-h-0">
-       <div className="flex justify-between items-center mb-2 border-t border-border-neutral pt-4">
-        <h2 className="text-lg font-semibold text-text-primary">{showArchived ? 'Archived Characters' : 'Characters'}</h2>
+       <div className="flex justify-between items-center mb-2 border-t border-border-color pt-2 px-2">
+        <h2 className="text-sm font-semibold text-text-primary uppercase">{showArchived ? 'Archived' : 'Characters'}</h2>
         <button
           onClick={onAddNew}
-          className="p-2 rounded-md text-text-secondary hover:bg-background-tertiary hover:text-text-primary transition-colors"
+          className="p-1 rounded-md text-text-secondary hover:bg-white hover:text-black transition-colors"
           title="Add New Character"
         >
-          <PlusIcon className="w-5 h-5" />
+          <PlusIcon className="w-4 h-4" />
         </button>
       </div>
        <button 
         onClick={onToggleArchiveView}
-        className="w-full flex items-center justify-center space-x-2 mb-2 text-sm py-2 px-3 rounded-md text-text-primary bg-background-tertiary hover:bg-opacity-80 transition-colors"
+        className="mx-2 mb-2 flex items-center justify-center space-x-2 text-xs py-1 px-2 rounded-md text-text-primary border border-border-color hover:bg-white/10 transition-colors"
       >
-        <ArchiveBoxIcon className="w-5 h-5" />
-        <span>{showArchived ? 'View Active Characters' : 'View Archived Characters'}</span>
+        <ArchiveBoxIcon className="w-4 h-4" />
+        <span>{showArchived ? 'View Active' : 'View Archive'}</span>
       </button>
 
-      <div className="space-y-2 overflow-y-auto pr-2">
+      <div className="space-y-1 overflow-y-auto px-2">
         {characters.length === 0 ? (
-           <p className="text-text-secondary text-sm text-center py-4">
+           <p className="text-text-secondary text-xs text-center py-4">
             {showArchived ? 'No archived characters.' : "No characters yet. Click '+' to create one."}
            </p>
         ) : (
           characters.map((char) => (
             <div
               key={char.id}
-              className="group flex items-center p-2 rounded-lg bg-background-primary hover:bg-background-tertiary"
+              className="group flex items-center p-2 rounded-sm bg-transparent hover:bg-white/5 border border-transparent hover:border-text-secondary"
             >
               <div className="flex-1 flex items-center min-w-0">
                 <img
                   src={char.avatarUrl || `https://picsum.photos/seed/${char.id}/40/40`}
                   alt={char.name}
-                  className="w-10 h-10 rounded-full mr-3 flex-shrink-0"
+                  className="w-6 h-6 rounded-full mr-2 flex-shrink-0 object-cover border border-text-secondary"
                 />
                 <div className="min-w-0">
                   <div className="flex items-center space-x-2">
-                    <p className="font-semibold truncate text-sm">{char.name}</p>
+                    <p className="font-semibold truncate text-xs text-text-primary">{char.name}</p>
                     {char.characterType === 'narrator' 
-                        ? <BookOpenIcon className="w-4 h-4 text-text-secondary flex-shrink-0" title="Narrator/Scenario"/> 
-                        : <UserIcon className="w-4 h-4 text-text-secondary flex-shrink-0" title="Persona"/>}
+                        ? <BookOpenIcon className="w-3 h-3 text-text-secondary flex-shrink-0" title="Narrator/Scenario"/> 
+                        : <UserIcon className="w-3 h-3 text-text-secondary flex-shrink-0" title="Persona"/>}
                   </div>
                 </div>
               </div>
-              <div className="ml-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="ml-1 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 {showArchived ? (
                   <>
                     <button
                       onClick={(e) => { e.stopPropagation(); onRestoreCharacter(char.id); }}
-                      className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-background-primary"
-                      title="Restore Character"
+                      className="p-1 hover:text-white"
+                      title="Restore"
                     >
-                      <RestoreIcon className="w-4 h-4" />
+                      <RestoreIcon className="w-3 h-3" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onPermanentlyDeleteCharacter(char.id); }}
-                      className="p-1 rounded text-text-secondary hover:text-accent-red hover:bg-background-primary"
+                      className="p-1 hover:text-red-500"
                       title="Delete Permanently"
                     >
-                      <TrashIcon className="w-4 h-4" />
+                      <TrashIcon className="w-3 h-3" />
                     </button>
                   </>
                 ) : (
                   <>
                     <button
                       onClick={(e) => { e.stopPropagation(); onExportCharacter(char.id); }}
-                      className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-background-primary"
-                      title="Export Character"
+                      className="p-1 hover:text-white"
+                      title="Export"
                     >
-                      <DownloadIcon className="w-4 h-4" />
+                      <DownloadIcon className="w-3 h-3" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onEditCharacter(char); }}
-                      className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-background-primary"
-                      title="Edit Character"
+                      className="p-1 hover:text-white"
+                      title="Edit"
                     >
-                      <EditIcon className="w-4 h-4" />
+                      <EditIcon className="w-3 h-3" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onDeleteCharacter(char.id); }}
-                      className="p-1 rounded text-text-secondary hover:text-accent-red hover:bg-background-primary"
-                      title="Archive Character"
+                      className="p-1 hover:text-red-500"
+                      title="Archive"
                     >
-                      <TrashIcon className="w-4 h-4" />
+                      <TrashIcon className="w-3 h-3" />
                     </button>
                   </>
                 )}

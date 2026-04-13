@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Character, Lorebook } from '../types.ts';
 import { UserIcon } from './icons/UserIcon.tsx';
@@ -63,79 +64,97 @@ export const ChatSelectionModal: React.FC<ChatSelectionModalProps> = ({ characte
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 z-40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-background-secondary rounded-lg shadow-xl w-full max-w-lg flex flex-col" onClick={e => e.stopPropagation()}>
-        <header className="p-4 border-b border-border-neutral flex justify-between items-center flex-shrink-0">
-          <h2 className="text-xl font-bold text-text-primary">Start a New Chat</h2>
-          <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors text-2xl font-bold leading-none p-1">&times;</button>
-        </header>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="text-xl font-bold">Start a New Chat</h2>
+          <button onClick={onClose} style={{background: 'transparent', border: 'none', fontSize: '1.5rem'}}>
+            &times;
+          </button>
+        </div>
         
-        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="modal-content flex flex-col gap-4">
             <div>
-                <label htmlFor="chat-name" className="block text-sm font-medium text-text-primary">Chat Name</label>
+                <label htmlFor="chat-name" className="block text-sm font-medium mb-1">Chat Name</label>
                 <input
                     id="chat-name"
                     type="text"
                     value={chatName}
                     onChange={(e) => setChatName(e.target.value)}
                     required
-                    className="mt-1 block w-full bg-background-primary border border-border-strong rounded-md shadow-sm py-2 px-3 text-text-primary placeholder-text-secondary focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                    placeholder="Enter chat name..."
                 />
             </div>
 
-            <div>
-                 <label className="block text-sm font-medium text-text-primary">Select Characters ({selectedCharIds.size})</label>
-                 <div className="mt-2 max-h-48 overflow-y-auto border border-border-neutral rounded-md p-2 space-y-2">
+            <div className="flex-1 min-h-0 flex flex-col">
+                 <label className="block text-sm font-medium mb-1">Select Characters ({selectedCharIds.size})</label>
+                 <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--border-color)', padding: '5px' }}>
                     {characters.length === 0 ? (
-                        <p className="text-text-secondary text-center p-4">No characters found. Please create one first.</p>
+                        <p className="text-dim text-center p-4">No characters found. Please create one first.</p>
                     ) : characters.map(character => (
-                        <div key={character.id} onClick={() => handleToggleCharacter(character.id)} className={`flex items-center p-2 rounded-md cursor-pointer transition-colors ${selectedCharIds.has(character.id) ? 'bg-primary-500/30' : 'hover:bg-background-tertiary'}`}>
+                        <div 
+                            key={character.id} 
+                            onClick={() => handleToggleCharacter(character.id)} 
+                            className="flex items-center p-2 rounded-sm cursor-pointer hover:bg-white/10"
+                            style={{ backgroundColor: selectedCharIds.has(character.id) ? 'rgba(0, 255, 65, 0.1)' : 'transparent' }}
+                        >
                             <input
                                 type="checkbox"
                                 checked={selectedCharIds.has(character.id)}
                                 readOnly
-                                className="h-4 w-4 rounded border-border-strong bg-background-primary text-primary-500 focus:ring-primary-500 pointer-events-none"
+                                style={{ marginRight: '10px' }}
                             />
-                            <img src={character.avatarUrl || `https://picsum.photos/seed/${character.id}/40/40`} alt={character.name} className="w-8 h-8 rounded-full mx-3"/>
+                            <div className="w-6 h-6 rounded-full overflow-hidden border border-text-secondary mr-2 flex-shrink-0">
+                                <img 
+                                    src={character.avatarUrl || `https://picsum.photos/seed/${character.id}/40/40`} 
+                                    alt={character.name} 
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                />
+                            </div>
                             <div className="flex items-center space-x-2">
-                                <span className="font-medium text-text-primary">{character.name}</span>
+                                <span className="font-bold">{character.name}</span>
                                 {character.characterType === 'narrator' 
-                                    ? <BookOpenIcon className="w-4 h-4 text-text-secondary flex-shrink-0" title="Narrator/Scenario"/> 
-                                    : <UserIcon className="w-4 h-4 text-text-secondary flex-shrink-0" title="Persona"/>}
+                                    ? <BookOpenIcon /> 
+                                    : <UserIcon />}
                             </div>
                         </div>
                     ))}
                  </div>
             </div>
 
-             <div>
-                 <label className="block text-sm font-medium text-text-primary">Attach Lorebooks ({selectedLorebookIds.size})</label>
-                 <div className="mt-2 max-h-48 overflow-y-auto border border-border-neutral rounded-md p-2 space-y-2">
+             <div className="flex-1 min-h-0 flex flex-col">
+                 <label className="block text-sm font-medium mb-1">Attach Lorebooks ({selectedLorebookIds.size})</label>
+                 <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid var(--border-color)', padding: '5px' }}>
                     {lorebooks.length === 0 ? (
-                        <p className="text-text-secondary text-center p-4">No lorebooks found.</p>
+                        <p className="text-dim text-center p-4">No lorebooks found.</p>
                     ) : lorebooks.map(lorebook => (
-                        <div key={lorebook.id} onClick={() => handleToggleLorebook(lorebook.id)} className={`flex items-center p-2 rounded-md cursor-pointer transition-colors ${selectedLorebookIds.has(lorebook.id) ? 'bg-primary-500/30' : 'hover:bg-background-tertiary'}`}>
+                        <div 
+                            key={lorebook.id} 
+                            onClick={() => handleToggleLorebook(lorebook.id)} 
+                            className="flex items-center p-2 rounded-sm cursor-pointer hover:bg-white/10"
+                            style={{ backgroundColor: selectedLorebookIds.has(lorebook.id) ? 'rgba(0, 255, 65, 0.1)' : 'transparent' }}
+                        >
                             <input
                                 type="checkbox"
                                 checked={selectedLorebookIds.has(lorebook.id)}
                                 readOnly
-                                className="h-4 w-4 rounded border-border-strong bg-background-primary text-primary-500 focus:ring-primary-500 pointer-events-none"
+                                style={{ marginRight: '10px' }}
                             />
-                            <span className="font-medium text-text-primary ml-3">{lorebook.name}</span>
+                            <span className="font-bold">{lorebook.name}</span>
                         </div>
                     ))}
                  </div>
             </div>
         </div>
 
-        <footer className="p-4 border-t border-border-neutral flex justify-end space-x-3">
-            <button onClick={onClose} className="py-2 px-4 rounded-md text-text-primary bg-background-tertiary hover:bg-opacity-80 font-medium">
+        <div className="modal-footer">
+            <button onClick={onClose}>
                 Cancel
             </button>
-            <button onClick={handleSubmit} className="py-2 px-4 rounded-md text-text-accent bg-primary-600 hover:bg-primary-500 font-medium">
+            <button onClick={handleSubmit} style={{ borderColor: 'var(--accent-color)' }}>
                 Create Chat
             </button>
-        </footer>
+        </div>
       </div>
     </div>
   );

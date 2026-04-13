@@ -212,8 +212,8 @@ const streamPollinationsChatResponse = async (
     history: Message[],
     onChunk: (chunk: string) => void
 ): Promise<void> => {
-    // Pollinations Text API is a simple GET request: https://text.pollinations.ai/{prompt}
-    // It is stateless, so we must combine history into the prompt.
+    // Legacy Pollinations Text API (GET) fallback if needed, 
+    // but we prefer OpenAI compatible now handled in CharacterForm.
     
     let fullPrompt = `${systemInstruction}\n\n`;
     history.forEach(msg => {
@@ -234,9 +234,90 @@ const streamPollinationsChatResponse = async (
             throw new Error(`Pollinations API Error: ${response.status}`);
         }
         const text = await response.text();
-        onChunk(text); // Pollinations text API is not streaming, so we send one chunk
+        onChunk(text); 
     } catch (error) {
         logger.error("Error generating Pollinations response:", error);
+        onChunk(`[Error: ${error instanceof Error ? error.message : String(error)}]`);
+    }
+};
+
+const generateAIHordeText = async (
+    config: ApiConfig,
+    systemInstruction: string,
+    history: Message[],
+    onChunk: (chunk: string) => void
+): Promise<void> => {
+    const apiKey = config.apiKey || '0000000000';
+    const model = config.model || 'koboldcpp/Llama-3-8B-Instruct-Q8_0';
+    const endpoint = config.apiEndpoint || 'https://stablehorde.net/api/v2/generate/text/async';
+
+    // Construct prompt
+    let fullPrompt = `${systemInstruction}\n\n`;
+    history.forEach(msg => {
+        const role = msg.role === 'user' ? 'User' : (msg.role === 'model' ? 'Assistant' : 'Narrator');
+        fullPrompt += `${role}: ${msg.content}\n`;
+    });
+    fullPrompt += "Assistant:";
+
+    try {
+        // 1. Initiate Generation
+        const initResponse = await fetchWithRetry(endpoint, {
+            method: 'POST',
+            headers: {
+                'apikey': apiKey,
+                'Content-Type': 'application/json',
+                'Client-Agent': 'AI_Nexus:1.0:Unknown',
+            },
+            body: JSON.stringify({
+                prompt: fullPrompt,
+                params: {
+                    n: 1,
+                    max_context_length: 2048,
+                    max_length: 256,
+                    temperature: 0.7
+                },
+                models: [model],
+            })
+        });
+
+        if (!initResponse.ok) {
+            const errText = await initResponse.text();
+            throw new Error(`AI Horde Init Error (${initResponse.status}): ${errText}`);
+        }
+
+        const initData = await initResponse.json();
+        const id = initData.id;
+        if (!id) throw new Error("AI Horde did not return a Job ID.");
+
+        // 2. Poll for completion
+        let attempts = 0;
+        let done = false;
+        while (!done && attempts < 60) {
+            await new Promise(r => setTimeout(r, 2000)); // Wait 2s
+            const statusResponse = await fetch(`https://stablehorde.net/api/v2/generate/text/status/${id}`, {
+                headers: { 'apikey': apiKey }
+            });
+            
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                if (statusData.done) {
+                    done = true;
+                    if (statusData.generations && statusData.generations.length > 0) {
+                        const text = statusData.generations[0].text;
+                        onChunk(text);
+                    } else {
+                        throw new Error("AI Horde finished but returned no text.");
+                    }
+                } else if (statusData.is_possible === false) {
+                    throw new Error("AI Horde says generation is impossible with current settings (no workers?).");
+                }
+            }
+            attempts++;
+        }
+        if (!done) throw new Error("AI Horde generation timed out.");
+
+    } catch (error) {
+        logger.error("AI Horde Text Error:", error);
         onChunk(`[Error: ${error instanceof Error ? error.message : String(error)}]`);
     }
 };
@@ -370,8 +451,16 @@ const generatePollinationsImage = async (prompt: string, settings: { [key: strin
         url += `&seed=${settings.seed}`;
     }
     
+    const headers: Record<string, string> = {};
+    if (settings.apiKey) {
+        headers['Authorization'] = `Bearer ${settings.apiKey}`;
+    }
+
     try {
-        const response = await fetchWithRetry(url, { method: 'GET' });
+        const response = await fetchWithRetry(url, { 
+            method: 'GET',
+            headers: headers 
+        });
         if (!response.ok) throw new Error(`Pollinations API Error: ${response.status}`);
         const blob = await response.blob();
         const base64 = await blobToBase64(blob);
@@ -724,7 +813,7 @@ export const streamChatResponse = async (
     onChunk: (chunk: string) => void,
     systemInstructionOverride?: string
 ): Promise<void> => {
-    const config = character.apiConfig || { service: 'default' };
+    const config: ApiConfig = character.apiConfig || { service: 'aihorde' };
     
     // Rate Limiting
     const rateLimit = config.rateLimit;
@@ -749,8 +838,12 @@ export const streamChatResponse = async (
         logger.log("Applying system instruction override for next response.");
     }
 
-    if (config.service === 'pollinations') {
+    if (config.service === 'aihorde') {
+        logger.log(`Using AI Horde Text API for character: ${character.name}`);
+        await generateAIHordeText(config, systemInstruction, history, onChunk);
+    } else if (config.service === 'pollinations') {
         logger.log(`Using Pollinations Text API for character: ${character.name}`);
+        // Modern Pollinations.ai can use OpenAI compatible endpoint, but if configured as 'pollinations' legacy type:
         await streamPollinationsChatResponse(systemInstruction, history, onChunk);
     } else if (['openai', 'groq', 'mistral', 'openrouter', 'kobold'].includes(config.service)) {
         logger.log(`Using OpenAI-compatible API (${config.service}) for character: ${character.name}`);
@@ -803,13 +896,15 @@ export const generateImageFromPrompt = async (prompt: string, settings?: { [key:
                 return await generateStabilityImage(prompt, safeSettings);
                 
             case 'aihorde':
+            case 'default':
+                // Default fallback to AI Horde now
                 return await generateAIHordeImage(prompt, safeSettings);
 
             case 'gemini':
-            case 'default':
-            default:
-                // Default fallback to Gemini
                 return await generateGeminiImage(prompt, safeSettings);
+            
+            default:
+                return await generateAIHordeImage(prompt, safeSettings);
         }
 
     } catch (error) {

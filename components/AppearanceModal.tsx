@@ -163,14 +163,14 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({ settings, curr
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 z-40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-background-secondary rounded-lg shadow-xl w-full max-w-2xl flex flex-col" onClick={e => e.stopPropagation()}>
-        <header className="p-4 border-b border-border-neutral flex justify-between items-center flex-shrink-0">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
           <h2 className="text-xl font-bold text-text-primary">Appearance Settings</h2>
           <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors text-2xl font-bold leading-none p-1">&times;</button>
-        </header>
+        </div>
         
-        <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+        <div className="modal-content space-y-6">
           <div className="space-y-3">
             <h3 className="text-lg font-medium text-text-primary">Theme</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -231,9 +231,9 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({ settings, curr
 
         </div>
 
-        <footer className="p-4 border-t border-border-neutral flex justify-end">
-            <button onClick={onClose} className="py-2 px-4 rounded-md text-text-primary bg-background-tertiary hover:bg-opacity-80">Close</button>
-        </footer>
+        <div className="modal-footer">
+            <button onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );

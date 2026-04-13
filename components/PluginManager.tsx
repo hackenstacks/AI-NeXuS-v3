@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Plugin, ApiConfig, ConfirmationRequest } from '../types.ts';
 import { logger } from '../services/loggingService.ts';
@@ -265,13 +266,13 @@ export const PluginManager: React.FC<PluginManagerProps> = ({ plugins, onPlugins
 
   // Helper to get available models for the current service
   const getCurrentServiceModels = () => {
-      const service = formState.settings?.service || 'default';
+      const service = formState.settings?.service || 'aihorde';
       return PROVIDER_MODELS[service] || [];
   };
 
   const currentModels = getCurrentServiceModels();
   const showApiEndpoint = ['openai', 'imagerouter'].includes(formState.settings?.service);
-  const showApiKey = ['openai', 'gemini', 'stability', 'huggingface', 'aihorde', 'imagerouter'].includes(formState.settings?.service);
+  const showApiKey = ['openai', 'gemini', 'stability', 'huggingface', 'aihorde', 'imagerouter', 'pollinations'].includes(formState.settings?.service);
 
   if (editingPlugin || isCreating) {
      return (
@@ -347,23 +348,27 @@ export const PluginManager: React.FC<PluginManagerProps> = ({ plugins, onPlugins
                       <label htmlFor="api-service" className="block text-sm font-medium text-nexus-gray-800 dark:text-nexus-gray-300">API Service</label>
                       <select 
                           id="api-service"
-                          value={formState.settings?.service || 'pollinations'}
+                          value={formState.settings?.service || 'aihorde'}
                           onChange={(e) => {
                               handleSettingsChange('service', e.target.value);
                               // Reset model when service changes to first available or empty
                               const models = PROVIDER_MODELS[e.target.value] || [];
                               handleSettingsChange('model', models.length > 0 ? models[0] : '');
+                              // Set default anonymous key if switching to aihorde
+                              if (e.target.value === 'aihorde' && !formState.settings?.apiKey) {
+                                  handleSettingsChange('apiKey', '0000000000');
+                              }
                           }}
                           className="mt-1 block w-full bg-nexus-gray-light-100 dark:bg-nexus-gray-800 border border-nexus-gray-light-400 dark:border-nexus-gray-700 rounded-md shadow-sm py-2 px-3 text-nexus-gray-900 dark:text-white focus:outline-none focus:ring-nexus-blue-500 focus:border-nexus-blue-500"
                       >
-                          <option value="pollinations">Pollinations.ai (Free, No Key)</option>
                           <option value="aihorde">AI Horde (Free/Kudos, Slow)</option>
+                          <option value="pollinations">Pollinations.ai (Free/Key)</option>
                           <option value="huggingface">Hugging Face (Free Tier/Pro)</option>
                           <option value="imagerouter">ImageRouter.io / OpenAI Compat</option>
                           <option value="stability">Stability.ai (Paid)</option>
                           <option value="gemini">Google Gemini (Custom Key)</option>
-                          <option value="default">Google Gemini (Default Env Key)</option>
                           <option value="openai">OpenAI-Compatible (e.g. DALL-E, Local)</option>
+                          <option value="default">Google Gemini (Default Env Key)</option>
                       </select>
                     </div>
 
